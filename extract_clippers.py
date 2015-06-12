@@ -67,9 +67,9 @@ def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, clip_len):
                 if al.is_reverse:
                     sequence = reverse_complement(sequence)
                     quals = quals[::-1]
-                    cigar = cigar[::-1]
-                    al.cigar = None
-                    al.cigar = cigar
+                    #cigar = cigar[::-1]
+                    #al.cigar = None
+                    #al.cigar = cigar
                 if al.is_read1:
                     al.qname = al.qname + "_1"
                 elif al.is_read2:
