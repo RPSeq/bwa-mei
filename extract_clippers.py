@@ -39,11 +39,11 @@ def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, clip_len):
         #arbitrary mapq cutoff
         if al.mapq > 5:
             #skip if there are secondaries
-            #try:
-            #    SA = al.opt('SA')
-            #    continue
-            #except:
-            #    pass
+            try:
+                SA = al.opt('SA')
+                continue
+            except:
+                pass
             
             #NOTE cigar = tuple list format [(0,14),(4,20)], cigarstr = string format
             #cigar_dict = {0:'M',1:'I',2:'D',3:'N',4:'S',5:'H',6:'P',7:'=',8:'X'}
