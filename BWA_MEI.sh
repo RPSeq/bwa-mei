@@ -18,7 +18,7 @@ MEI_CUTOFF=$6
 
 #Set relative dirs
 WORKING_DIR=$(readlink -f $PWD)
-SCRIPTS_DIR="/gscmnt/gc2719/halllab/users/rsmith/transposons/scripts"
+SCRIPTS_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 FILE_LABEL=$(basename $INPUT_BAM ".bam")
 FILE_DIR=$(dirname $INPUT_BAM)
 SPLITTERS=${FILE_DIR}/${FILE_LABEL}.splitters.bam
