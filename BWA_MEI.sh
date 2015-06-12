@@ -86,7 +86,8 @@ python ${SCRIPTS_DIR}/mapq_filter.py -S -a $REF_CUTOFF -u $MEI_CUTOFF > ${RESULT
 samtools sort ${RESULTS_DIR}/${PREFIX}.disc.repaired.merged.bam ${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged;
 
 OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged.bam | wc -l)";
-echo -e "Total paired-end reads fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
+OUTPUT=$((OUTPUT/2));
+echo -e "Total read-pairs fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
 
 #	b. Get insert size distribution file
 samtools view ${INPUT_BAM} \
@@ -119,7 +120,8 @@ python ${SCRIPTS_DIR}/repair_cigars.py -c 20 -i ${RESULTS_DIR}/${PREFIX}.split.m
 python ${SCRIPTS_DIR}/mapq_filter.py -S -a $REF_CUTOFF -u $MEI_CUTOFF > ${RESULTS_DIR}/${PREFIX}.split.repaired.bam;
 
 OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.split.repaired.bam | wc -l)";
-echo -e "Total split-reads fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
+OUTPUT=$((OUTPUT/2));
+echo -e "Total split-read pairs fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
 
 sambamba sort -t 2 ${RESULTS_DIR}/${PREFIX}.split.repaired.bam -o ${RESULTS_DIR}/${PREFIX}.split.repaired.sorted.bam
 
