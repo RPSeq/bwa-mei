@@ -43,7 +43,7 @@ def scan(bamfile, is_sam, ref_cutoff, mei_cutoff):
 # ============================================
 # functions
 # ============================================
-class mei_pair:
+class mei_pair(object):
     def __init__(self, al, bamfile):
         self.ref_anchor = None
         self.mei_anchor = None
