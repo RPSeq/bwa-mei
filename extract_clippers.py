@@ -15,7 +15,7 @@ __author__ = "Ryan Smith (ryanpsmith@wustl.edu) with code by Colby Chiang (cc2qe
 __version__ = "$Revision: 0.0.1 $"
 __date__ = "$Date: 2014-12-15 11:43 $"
 
-def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, clip_len):
+def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, split_anchorfile, clip_len):
     # set input file
     clip_len = int(clip_len)
     if bamfile == None:
@@ -29,22 +29,35 @@ def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, clip_len):
         else:
             in_bam = pysam.Samfile(bamfile, "rb")
     
+    exclude_bam = pysam.Samfile(split_anchorfile, "rb")
+    
     unanchors_out_fastq = open(unanchorfile, 'w')
     anchors_out_bam = pysam.Samfile(anchorfile, 'wb', template=in_bam)
+    
+    excludes = set()
+    for al in exclude_bam:
+        excludes.add(al.qname)
     
     for al in in_bam:
         # add read name to dictionary if not already there
         if al.is_secondary:
             continue
         #arbitrary mapq cutoff
-        if al.mapq > 5:
-            #skip if there are secondaries
-            try:
-                SA = al.opt('SA')
+        if al.mapq > 0 or not al.is_unmapped:
+            ##skip if there are secondaries
+            #try:
+            #    SA = al.opt('SA')
+            #    continue
+            #except:
+            #    pass
+                
+            if al.is_read1:
+                al.qname = al.qname + "_1"
+            elif al.is_read2:
+                al.qname = al.qname + "_2"
+            if al.qname in excludes:
                 continue
-            except:
-                pass
-            
+                
             #NOTE cigar = tuple list format [(0,14),(4,20)], cigarstr = string format
             #cigar_dict = {0:'M',1:'I',2:'D',3:'N',4:'S',5:'H',6:'P',7:'=',8:'X'}
             cigar = al.cigar
@@ -70,10 +83,6 @@ def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, clip_len):
                     #cigar = cigar[::-1]
                     #al.cigar = None
                     #al.cigar = cigar
-                if al.is_read1:
-                    al.qname = al.qname + "_1"
-                elif al.is_read2:
-                    al.qname = al.qname + "_2"
                 unanchors_out_fastq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+sequence+"\n+\n"+quals+"\n")
                 anchors_out_bam.write(al)
 
@@ -96,6 +105,7 @@ description: Group BAM file by read IDs without sorting")
     parser.add_argument('-i', '--input', metavar='BAM', required=False, help='Input BAM file')
     parser.add_argument('-S', required=False, action='store_true', help='Input is SAM format')
     parser.add_argument('-a', '--anchors', required=True, help='Output anchors bamfile')
+    parser.add_argument('-e', '--exclude', required=True, help='Input split anchors bamfile to exclude these reads')
     parser.add_argument('-u', '--unanchors', required=True, help='Output unanchors fastq')
     parser.add_argument('-c', '--clip', required=True, help='Minimum clip length')
     # parse the arguments
@@ -120,7 +130,7 @@ class Usage(Exception):
 
 def main():
     args = get_args()
-    extract_clippers(args.input, args.S, args.anchors, args.unanchors, args.clip)
+    extract_clippers(args.input, args.S, args.anchors, args.unanchors, args.exclude,  args.clip)
 
 if __name__ == "__main__":
     try:
