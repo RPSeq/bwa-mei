@@ -1,10 +1,5 @@
 #!/usr/bin/env python
 
-#This script takes a bwa-mei .vcf as input and identified 5' and 3' clusters of events for each MEI call.
-
-
-#!/usr/bin/env python
-
 import argparse, sys
 import math, time, re
 from argparse import RawTextHelpFormatter
@@ -253,8 +248,212 @@ class Genotype(object):
             else:
                 g_list.append('.')
         return ':'.join(map(str,g_list))
-        
-        
+
+# primary function
+def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
+    vcf = Vcf()
+    in_header = True
+    header = []
+    # dict of BND variant lines that have not yet been matched.
+    # variant id is the key
+    unmatched = dict()    
+    coords = dict()
+    for line in vcf_file:
+        if in_header:
+            if line[0] == '#':
+                header.append(line)
+                if line[1] != '#':
+                    sample_list = line.rstrip().split('\t')[9:]
+                continue
+            else:
+                # print header
+                bedpe_out.write('\t'.join(['#CHROM_A',
+                                           'START_A',
+                                           'END_A',
+                                           'CHROM_B',
+                                           'START_B',
+                                           'END_B',
+                                           'ID',
+                                           'QUAL',
+                                           'STRAND_A',
+                                           'STRAND_B',
+                                           'TYPE',
+                                           'FILTER',
+                                           'INFO',
+                                           'FORMAT'] +
+                                           sample_list
+                                          ) + '\n')
+                in_header = False
+                vcf.add_header(header)
+
+        v = line.rstrip().split('\t')
+        var = Variant(v, vcf)
+
+        if var.info['SVTYPE'] != 'BND':
+            b1 = var.pos
+            b2 = int(var.info['END'])
+            name = v[2]
+            score = v[5]
+
+            strands = var.info['STRANDS']
+            o1 = strands[0]
+            o2 = strands[1]
+
+            span = map(int, var.info['CIPOS'].split(','))
+            s1 = b1 + span[0] - 1
+            e1 = b1 + span[1]
+
+            span = map(int, var.info['CIEND'].split(','))
+            s2 = b2 + span[0] - 1
+            e2 = b2 + span[1]
+
+            ispan = s2 - e1
+            ospan = e2 - s1
+
+            ev_list = list()
+            for ev in ['PE', 'SR']:
+                if int(var.info[ev]) > 0:
+                    ev_list.append(ev)
+            evtype = ','.join(ev_list)
+                    
+            format_list = v[8].split(':')
+            sample_gt = dict()
+            var_sample_list = []
+            for i in range(len(sample_list)):
+                s = sample_list[i]
+                gt = v[9 + i]
+                format_dict = dict(zip(format_list, gt.split(':')))
+                format_dict['PE'] = int(format_dict['PE'])
+                format_dict['SR'] = int(format_dict['SR'])
+                format_dict['SU'] = int(format_dict['SU'])
+                if format_dict['SU'] > 0:
+                    var_sample_list.append(sample_list[i])
+                sample_gt[s] = format_dict
+
+            gt_string = '\t'.join(map(str,[sample_gt[s]['SU'] for s in sample_list]))
+            support = sum([sample_gt[s]['SU'] for s in sample_list])
+
+            bedpe_out.write('\t'.join(map(str,
+                                          [var.chrom,
+                                           s1,
+                                           e1,
+                                           var.chrom,
+                                           s2,
+                                           e2,
+                                           name,
+                                           var.qual,
+                                           o1,
+                                           o2,
+                                           var.info['SVTYPE'],
+                                           var.filter,
+                                           var.get_info_string(),
+                                           var.get_format_string()])
+                                           + [var.gts[sample].get_gt_string() for sample in var.sample_list]
+                                      ) + '\n')
+
+        else:
+            mate_id = var.info['MATEID']
+            if mate_id in unmatched:
+                if mei_prefix in var.chrom:
+                    prim = unmatched[mate_id]
+                    sec = var
+                else:
+                    sec = unmatched[mate_id]
+                    prim = var
+
+                b1 = prim.pos
+                b2 = sec.pos
+                score = v[5]
+                
+                #need to manually determine strands from alt block N[moblist[ or N]moblist] or [moblist[N or ]moblist]N 
+                #strands = prim.info['STRANDS']
+                #o1 = strands[0]
+                #o2 = strands[1]
+                
+                # 4 possible alt configurations:
+                if prim.alt.startswith("N]"):
+                    ref_strand, mei_strand = "-","-"
+                    mei, coord = prim.alt.split("]")[1].split(":")
+                    
+                elif prim.alt.startswith("N["):
+                    ref_strand, mei_strand = "+","+"
+                    mei, coord = prim.alt.split("[")[1].split(":")
+                    
+                elif prim.alt.startswith("]"):
+                    ref_strand, mei_strand = "+","-"
+                    mei, coord = prim.alt.split("]")[1].split(":")
+                    
+                elif prim.alt.startswith("["):
+                    ref_strand, mei_strand = "-","+"
+                    mei, coord = prim.alt.split("[")[1].split(":")
+                
+                span = map(int, prim.info['CIPOS'].split(','))
+                s1 = b1 + span[0] - 1
+                e1 = b1 + span[1]
+
+                span = map(int, sec.info['CIPOS'].split(','))
+                s2 = b2 + span[0] - 1
+                e2 = b2 + span[1]
+
+                ispan = s2 - e1
+                ospan = e2 - s1
+
+                ev_list = list()
+                for ev in ['PE', 'SR']:
+                    if int(var.info[ev]) > 0:
+                        ev_list.append(ev)
+                evtype = ','.join(ev_list)
+                            
+                format_list = v[8].split(':')
+                sample_gt = dict()
+                var_sample_list = []
+                for i in range(len(sample_list)):
+                    s = sample_list[i]
+                    gt = v[9 + i]
+                    format_dict = dict(zip(format_list, gt.split(':')))
+                    format_dict['PE'] = int(format_dict['PE'])
+                    format_dict['SR'] = int(format_dict['SR'])
+                    format_dict['SU'] = int(format_dict['SU'])
+                    if format_dict['SU'] > 0:
+                        var_sample_list.append(sample_list[i])
+                    sample_gt[s] = format_dict
+
+                gt_string = '\t'.join(map(str,[sample_gt[s]['SU'] for s in sample_list]))
+                support = sum([sample_gt[s]['SU'] for s in sample_list])
+
+                bedpe_out.write('\t'.join(map(str,
+                                              [prim.chrom,
+                                               s1,
+                                               e1,
+                                               sec.chrom,
+                                               s2,
+                                               e2,
+                                               prim.info['EVENT'],
+                                               prim.qual,
+                                               o1,
+                                               o2,
+                                               prim.info['SVTYPE'],
+                                               prim.filter,
+                                               prim.get_info_string(),
+                                               prim.get_format_string(),
+                                               '\t'.join([prim.gts[sample].get_gt_string() for sample in prim.sample_list])
+                                           ])) + '\n')
+
+                # delete the mate from the dictionary
+                del unmatched[mate_id]
+            else:
+                # if the mate isn't already in the dict, add current variant to dictionary
+                unmatched[var.var_id] = var
+
+    if len(unmatched) > 0:
+        sys.stderr.write("Warning: %s unmatched variants\n"
+                         % len(unmatched))
+    # close the files
+    bedpe_out.close()
+    vcf_file.close()
+
+    return
+
 # --------------------------------------
 # wrapper function
 
