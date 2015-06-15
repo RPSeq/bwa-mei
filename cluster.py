@@ -230,9 +230,9 @@ class Genotype(object):
                 self.variant.active_formats.append(field)
                 # sort it to be in the same order as the format_list in header
                 self.variant.active_formats.sort(key=lambda x: [f.id for f in self.variant.format_list].index(x))
-        else:
-            sys.stderr.write('\nError: invalid FORMAT field, \"' + field + '\"\n')
-            exit(1)
+        # else:
+        #     sys.stderr.write('\nError: invalid FORMAT field, \"' + field + '\"\n')
+        #     exit(1)
 
     def get_format(self, field):
         return self.format[field]
@@ -250,14 +250,11 @@ class Genotype(object):
         return ':'.join(map(str,g_list))
 
 # primary function
-def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
+def vcfToBedpe(vcf_file, bedpe_out):
     vcf = Vcf()
     in_header = True
     header = []
-    # dict of BND variant lines that have not yet been matched.
-    # variant id is the key
-    unmatched = dict()    
-    coords = dict()
+
     for line in vcf_file:
         if in_header:
             if line[0] == '#':
@@ -267,22 +264,39 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
                 continue
             else:
                 # print header
-                bedpe_out.write('\t'.join(['#CHROM_A',
-                                           'START_A',
-                                           'END_A',
-                                           'CHROM_B',
-                                           'START_B',
-                                           'END_B',
-                                           'ID',
-                                           'QUAL',
-                                           'STRAND_A',
-                                           'STRAND_B',
-                                           'TYPE',
-                                           'FILTER',
-                                           'INFO',
-                                           'FORMAT'] +
-                                           sample_list
-                                          ) + '\n')
+                if len(sample_list) > 0:
+                    bedpe_out.write('\t'.join(['#CHROM_A',
+                                               'START_A',
+                                               'END_A',
+                                               'CHROM_B',
+                                               'START_B',
+                                               'END_B',
+                                               'ID',
+                                               'QUAL',
+                                               'STRAND_A',
+                                               'STRAND_B',
+                                               'TYPE',
+                                               'FILTER',
+                                               'INFO',
+                                               'FORMAT'] +
+                                               sample_list
+                                              ) + '\n')
+                else:
+                    bedpe_out.write('\t'.join(['#CHROM_A',
+                                               'START_A',
+                                               'END_A',
+                                               'CHROM_B',
+                                               'START_B',
+                                               'END_B',
+                                               'ID',
+                                               'QUAL',
+                                               'STRAND_A',
+                                               'STRAND_B',
+                                               'TYPE',
+                                               'FILTER',
+                                               'INFO']
+                                              ) + '\n')
+                    
                 in_header = False
                 vcf.add_header(header)
 
@@ -310,29 +324,7 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
             ispan = s2 - e1
             ospan = e2 - s1
 
-            ev_list = list()
-            for ev in ['PE', 'SR']:
-                if int(var.info[ev]) > 0:
-                    ev_list.append(ev)
-            evtype = ','.join(ev_list)
-                    
-            format_list = v[8].split(':')
-            sample_gt = dict()
-            var_sample_list = []
-            for i in range(len(sample_list)):
-                s = sample_list[i]
-                gt = v[9 + i]
-                format_dict = dict(zip(format_list, gt.split(':')))
-                format_dict['PE'] = int(format_dict['PE'])
-                format_dict['SR'] = int(format_dict['SR'])
-                format_dict['SU'] = int(format_dict['SU'])
-                if format_dict['SU'] > 0:
-                    var_sample_list.append(sample_list[i])
-                sample_gt[s] = format_dict
-
-            gt_string = '\t'.join(map(str,[sample_gt[s]['SU'] for s in sample_list]))
-            support = sum([sample_gt[s]['SU'] for s in sample_list])
-
+            # write bedpe
             bedpe_out.write('\t'.join(map(str,
                                           [var.chrom,
                                            s1,
@@ -345,109 +337,54 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
                                            o1,
                                            o2,
                                            var.info['SVTYPE'],
-                                           var.filter,
-                                           var.get_info_string(),
-                                           var.get_format_string()])
-                                           + [var.gts[sample].get_gt_string() for sample in var.sample_list]
-                                      ) + '\n')
-
+                                           var.filter] +
+                                           v[7:]
+                                          )) + '\n')
         else:
-            mate_id = var.info['MATEID']
-            if mate_id in unmatched:
-                if mei_prefix in var.chrom:
-                    prim = unmatched[mate_id]
-                    sec = var
-                else:
-                    sec = unmatched[mate_id]
-                    prim = var
+            if 'SECONDARY' in var.info:
+                continue
 
-                b1 = prim.pos
-                b2 = sec.pos
-                score = v[5]
-                
-                #need to manually determine strands from alt block N[moblist[ or N]moblist] or [moblist[N or ]moblist]N 
-                #strands = prim.info['STRANDS']
-                #o1 = strands[0]
-                #o2 = strands[1]
-                
-                # 4 possible alt configurations:
-                if prim.alt.startswith("N]"):
-                    ref_strand, mei_strand = "-","-"
-                    mei, coord = prim.alt.split("]")[1].split(":")
-                    
-                elif prim.alt.startswith("N["):
-                    ref_strand, mei_strand = "+","+"
-                    mei, coord = prim.alt.split("[")[1].split(":")
-                    
-                elif prim.alt.startswith("]"):
-                    ref_strand, mei_strand = "+","-"
-                    mei, coord = prim.alt.split("]")[1].split(":")
-                    
-                elif prim.alt.startswith("["):
-                    ref_strand, mei_strand = "-","+"
-                    mei, coord = prim.alt.split("[")[1].split(":")
-                
-                span = map(int, prim.info['CIPOS'].split(','))
-                s1 = b1 + span[0] - 1
-                e1 = b1 + span[1]
+            b1 = var.pos
+            sep = '['
+            if sep not in var.alt:
+                sep = ']'
+            r = re.compile(r'\%s(.+?)\%s' % (sep, sep))
+            chrom2, b2 = r.findall(var.alt)[0].split(':')
+            b2 = int(b2)
 
-                span = map(int, sec.info['CIPOS'].split(','))
-                s2 = b2 + span[0] - 1
-                e2 = b2 + span[1]
+            score = v[5]
 
-                ispan = s2 - e1
-                ospan = e2 - s1
+            strands = var.info['STRANDS']
+            o1 = strands[0]
+            o2 = strands[1]
 
-                ev_list = list()
-                for ev in ['PE', 'SR']:
-                    if int(var.info[ev]) > 0:
-                        ev_list.append(ev)
-                evtype = ','.join(ev_list)
-                            
-                format_list = v[8].split(':')
-                sample_gt = dict()
-                var_sample_list = []
-                for i in range(len(sample_list)):
-                    s = sample_list[i]
-                    gt = v[9 + i]
-                    format_dict = dict(zip(format_list, gt.split(':')))
-                    format_dict['PE'] = int(format_dict['PE'])
-                    format_dict['SR'] = int(format_dict['SR'])
-                    format_dict['SU'] = int(format_dict['SU'])
-                    if format_dict['SU'] > 0:
-                        var_sample_list.append(sample_list[i])
-                    sample_gt[s] = format_dict
+            span = map(int, var.info['CIPOS'].split(','))
+            s1 = b1 + span[0] - 1
+            e1 = b1 + span[1]
 
-                gt_string = '\t'.join(map(str,[sample_gt[s]['SU'] for s in sample_list]))
-                support = sum([sample_gt[s]['SU'] for s in sample_list])
+            span = map(int, var.info['CIEND'].split(','))
+            s2 = b2 + span[0] - 1
+            e2 = b2 + span[1]
 
-                bedpe_out.write('\t'.join(map(str,
-                                              [prim.chrom,
-                                               s1,
-                                               e1,
-                                               sec.chrom,
-                                               s2,
-                                               e2,
-                                               prim.info['EVENT'],
-                                               prim.qual,
-                                               o1,
-                                               o2,
-                                               prim.info['SVTYPE'],
-                                               prim.filter,
-                                               prim.get_info_string(),
-                                               prim.get_format_string(),
-                                               '\t'.join([prim.gts[sample].get_gt_string() for sample in prim.sample_list])
-                                           ])) + '\n')
+            ispan = s2 - e1
+            ospan = e2 - s1
 
-                # delete the mate from the dictionary
-                del unmatched[mate_id]
-            else:
-                # if the mate isn't already in the dict, add current variant to dictionary
-                unmatched[var.var_id] = var
-
-    if len(unmatched) > 0:
-        sys.stderr.write("Warning: %s unmatched variants\n"
-                         % len(unmatched))
+            # write bedpe
+            bedpe_out.write('\t'.join(map(str,
+                                          [var.chrom,
+                                           s1,
+                                           e1,
+                                           chrom2,
+                                           s2,
+                                           e2,
+                                           var.info['EVENT'],
+                                           var.qual,
+                                           o1,
+                                           o2,
+                                           var.info['SVTYPE'],
+                                           var.filter] +
+                                           v[7:]
+                                          )) + '\n')
     # close the files
     bedpe_out.close()
     vcf_file.close()
