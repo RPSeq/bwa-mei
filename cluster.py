@@ -249,25 +249,56 @@ class Genotype(object):
             else:
                 g_list.append('.')
         return ':'.join(map(str,g_list))
+        
+class mei_Variant(object):
+    def __init__(self, varlist):
+        self.chrom = varlist[0]
+        self.pos = varlist[2]
 
+        
 def merge_meis(var_cluster):
     for mei_group in var_cluster:
+        ori_groups = defaultdict(list)
         cluster = var_cluster[mei_group]
-        for i in range(len(cluster)):
-            if cluster[0].alt[0]==cluster[i].alt[-1]:
-                for var in cluster:
-                    print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.alt)
-                print("")
-                break
+        
+        for var in cluster:
+            ori_groups[var.alt[:2]].append(var)
+        
+        merged = []
+        for ori, variants in ori_groups.viewitems():
+            SU,SR,PE=0,0,0
+            startlist = []
+            poslist = []
+            endlist = []
+            for var in variants:
+                SU += int(var.info['SU'])
+                SR += int(var.info['SR'])
+                PE += int(var.info['PE'])
+                poslist.append(var.pos)
+                startlist.append(var.info['CIPOS95'])
+                endlist.append(var.info['CIEND95'])
+                sep = "]"
+                if sep not in var.alt:
+                    sep = "["
+                if var.alt.startswith("N"):
+                    new_alt = "N"+sep+mei_group+sep
+                else:
+                    new_alt = sep+mei_group+sep+"N"
                     
-    
+            #need to make a new variant here
+            merged.append([new_alt, poslist, SU, SR, PE, startlist, endlist])
+
+        if len(merged) > 1:
+            for var in merged:
+                print(var)
+            print("")
+
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
     vcf = Vcf()
     in_header = True
     header = []
     prev_var = False
-    #var_cluster = []
     var_cluster = defaultdict(list)
     
     for line in vcf_file:
