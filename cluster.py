@@ -338,17 +338,12 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
                 #catch (some) unsorted VCF files
                 if (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos < 0):
                     exit("Error: Input .vcf must be coordinate sorted!")
-                elif (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos <= window):
-                    var_cluster[mei_group].append(var)
-                else:
+                elif (var.chrom != prev_var.chrom) or (var.pos - prev_var.pos > window):
                     merge_meis(var_cluster)
                     var_cluster.clear()
-                    var_cluster[mei_group].append(var)  
-                              
-            else:
-                var_cluster[mei_group].append(var)
             
             prev_var = var
+            var_cluster[mei_group].append(var)
             
             # strands = var.info['STRANDS']
             # o1 = strands[0]
