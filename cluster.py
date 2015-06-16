@@ -249,12 +249,19 @@ class Genotype(object):
                 g_list.append('.')
         return ':'.join(map(str,g_list))
 
+def merge_meis(vars):
+    #testing purposes.
+    for var in vars:
+        print (var.chrom+"\t"+var.pos)
+    
 # primary function
-def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
+def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
     vcf = Vcf()
     in_header = True
     header = []
-
+    prev_var = False
+    var_cluster = []
+    
     for line in vcf_file:
         if in_header:
             if line[0] == '#':
@@ -310,27 +317,41 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
             if mei_prefix in var.chrom:
                 continue
 
-            b1 = var.pos
+            ref_break = var.pos
             sep = '['
             if sep not in var.alt:
                 sep = ']'
             r = re.compile(r'\%s(.+?)\%s' % (sep, sep))
-            chrom2, b2 = r.findall(var.alt)[0].split(':')
-            b2 = int(b2)
-
-            score = v[5]
+            mei_chrom, mei_break = r.findall(var.alt)[0].split(':')
+            mei_break = int(mei_break)
+            
+            if prev_var:
+                #catch (some) unsorted VCF files
+                if (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos < 0):
+                    exit("Error: Input .vcf must be coordinate sorted!")
+                elif (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos <= window):
+                    var_cluster.append(var)
+                else:
+                    merge_meis(var_cluster)
+                    var_cluster = [var]
+                    prev_var = var
+            
+            else:
+                var_cluster = [var]
+                prev_var = var
+            #score = v[5]
 
             strands = var.info['STRANDS']
             o1 = strands[0]
             o2 = strands[1]
 
             span = map(int, var.info['CIPOS'].split(','))
-            s1 = b1 + span[0] - 1
-            e1 = b1 + span[1]
+            s1 = ref_break + span[0] - 1
+            e1 = ref_break + span[1]
 
             span = map(int, var.info['CIEND'].split(','))
-            s2 = b2 + span[0] - 1
-            e2 = b2 + span[1]
+            s2 = mei_break + span[0] - 1
+            e2 = mei_break + span[1]
 
             ispan = s2 - e1
             ospan = e2 - s1
@@ -340,7 +361,7 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
                                           [var.chrom,
                                            s1,
                                            e1,
-                                           chrom2,
+                                           mei_chrom,
                                            s2,
                                            e2,
                                            var.info['EVENT'],
@@ -351,6 +372,8 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
                                            var.filter] +
                                            v[7:]
                                           )) + '\n')
+            
+            
     # close the files
     bedpe_out.close()
     vcf_file.close()
