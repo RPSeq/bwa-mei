@@ -250,15 +250,16 @@ class Genotype(object):
                 g_list.append('.')
         return ':'.join(map(str,g_list))
 
-def merge_meis(vars):
-    #testing purposes.
-    #if len(vars) > 1:
-    for i in range(len(vars)):
-        if vars[0].alt[0]==vars[i].alt[-1]:
-            for var in vars:
-                print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.alt)
-            print("")
-            return
+def merge_meis(var_cluster):
+    for mei_group in var_cluster:
+        cluster = var_cluster[mei_group]
+        for i in range(len(cluster)):
+            if cluster[0].alt[0]==cluster[i].alt[-1]:
+                for var in cluster:
+                    print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.alt)
+                print("")
+                break
+                    
     
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
@@ -266,8 +267,8 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
     in_header = True
     header = []
     prev_var = False
-    var_cluster = []
-    #var_cluster = defaultdict()
+    #var_cluster = []
+    var_cluster = defaultdict(list)
     
     for line in vcf_file:
         if in_header:
@@ -331,19 +332,21 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
             r = re.compile(r'\%s(.+?)\%s' % (sep, sep))
             mei_chrom, mei_break = r.findall(var.alt)[0].split(':')
             mei_break = int(mei_break)
+            mei_group = mei_chrom.split(".")[0]
             
             if prev_var:
                 #catch (some) unsorted VCF files
                 if (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos < 0):
                     exit("Error: Input .vcf must be coordinate sorted!")
                 elif (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos <= window):
-                    var_cluster.append(var)
+                    var_cluster[mei_group].append(var)
                 else:
                     merge_meis(var_cluster)
-                    var_cluster = [var]  
+                    var_cluster.clear()
+                    var_cluster[mei_group].append(var)  
                               
             else:
-                var_cluster = [var]
+                var_cluster[mei_group].append(var)
             
             prev_var = var
             
