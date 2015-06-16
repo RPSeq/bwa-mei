@@ -3,6 +3,7 @@
 import argparse, sys
 import math, time, re
 from argparse import RawTextHelpFormatter
+from collections import defaultdict
 
 __author__ = "Colby Chiang (cc2qe@virginia.edu)"
 __version__ = "$Revision: 0.0.1 $"
@@ -251,9 +252,13 @@ class Genotype(object):
 
 def merge_meis(vars):
     #testing purposes.
-    if len(vars) > 1:
-        for var in vars:
-            print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.alt)
+    #if len(vars) > 1:
+    for i in range(len(vars)):
+        if vars[0].alt[0]==vars[i].alt[-1]:
+            for var in vars:
+                print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.alt)
+            print("")
+            return
     
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
@@ -262,6 +267,7 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
     header = []
     prev_var = False
     var_cluster = []
+    #var_cluster = defaultdict()
     
     for line in vcf_file:
         if in_header:
@@ -334,45 +340,44 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
                     var_cluster.append(var)
                 else:
                     merge_meis(var_cluster)
-                    var_cluster = [var]
-                    prev_var = var
-            
+                    var_cluster = [var]  
+                              
             else:
                 var_cluster = [var]
-                prev_var = var
-            #score = v[5]
-
-            strands = var.info['STRANDS']
-            o1 = strands[0]
-            o2 = strands[1]
-
-            span = map(int, var.info['CIPOS'].split(','))
-            s1 = ref_break + span[0] - 1
-            e1 = ref_break + span[1]
-
-            span = map(int, var.info['CIEND'].split(','))
-            s2 = mei_break + span[0] - 1
-            e2 = mei_break + span[1]
-
-            ispan = s2 - e1
-            ospan = e2 - s1
-
-            # write bedpe
+            
+            prev_var = var
+            
+            # strands = var.info['STRANDS']
+            # o1 = strands[0]
+            # o2 = strands[1]
+            # 
+            # span = map(int, var.info['CIPOS'].split(','))
+            # s1 = ref_break + span[0] - 1
+            # e1 = ref_break + span[1]
+            # 
+            # span = map(int, var.info['CIEND'].split(','))
+            # s2 = mei_break + span[0] - 1
+            # e2 = mei_break + span[1]
+            # 
+            # ispan = s2 - e1
+            # ospan = e2 - s1
+            # 
+            # #write bedpe
             # bedpe_out.write('\t'.join(map(str,
-                                          # [var.chrom,
-                                           # s1,
-                                           # e1,
-                                           # mei_chrom,
-                                           # s2,
-                                           # e2,
-                                           # var.info['EVENT'],
-                                           # var.qual,
-                                           # o1,
-                                           # o2,
-                                           # var.info['SVTYPE'],
-                                           # var.filter] +
-                                           # v[7:]
-                                          # )) + '\n')
+            #                               [var.chrom,
+            #                                 s1,
+            #                                 e1,
+            #                                 mei_chrom,
+            #                                 s2,
+            #                                 e2,
+            #                                 var.info['EVENT'],
+            #                                 var.qual,
+            #                                 o1,
+            #                                 o2,
+            #                                 var.info['SVTYPE'],
+            #                                 var.filter] +
+            #                                 v[7:]
+            #                               )) + '\n')
             
             
     # close the files
