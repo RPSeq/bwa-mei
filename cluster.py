@@ -250,7 +250,7 @@ class Genotype(object):
         return ':'.join(map(str,g_list))
 
 # primary function
-def vcfToBedpe(vcf_file, bedpe_out):
+def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist"):
     vcf = Vcf()
     in_header = True
     header = []
@@ -304,44 +304,10 @@ def vcfToBedpe(vcf_file, bedpe_out):
         var = Variant(v, vcf)
 
         if var.info['SVTYPE'] != 'BND':
-            b1 = var.pos
-            b2 = int(var.info['END'])
-            name = v[2]
-            score = v[5]
-
-            strands = var.info['STRANDS']
-            o1 = strands[0]
-            o2 = strands[1]
-
-            span = map(int, var.info['CIPOS'].split(','))
-            s1 = b1 + span[0] - 1
-            e1 = b1 + span[1]
-
-            span = map(int, var.info['CIEND'].split(','))
-            s2 = b2 + span[0] - 1
-            e2 = b2 + span[1]
-
-            ispan = s2 - e1
-            ospan = e2 - s1
-
-            # write bedpe
-            bedpe_out.write('\t'.join(map(str,
-                                          [var.chrom,
-                                           s1,
-                                           e1,
-                                           var.chrom,
-                                           s2,
-                                           e2,
-                                           name,
-                                           var.qual,
-                                           o1,
-                                           o2,
-                                           var.info['SVTYPE'],
-                                           var.filter] +
-                                           v[7:]
-                                          )) + '\n')
+            continue
+           
         else:
-            if 'SECONDARY' in var.info:
+            if mei_prefix in var.chrom:
                 continue
 
             b1 = var.pos
