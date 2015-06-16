@@ -253,7 +253,7 @@ def merge_meis(vars):
     #testing purposes.
     if len(vars) > 1:
         for var in vars:
-            print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.info['STRANDS'])
+            print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.alt)
     
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
