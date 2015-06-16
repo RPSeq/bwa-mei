@@ -251,8 +251,9 @@ class Genotype(object):
 
 def merge_meis(vars):
     #testing purposes.
-    for var in vars:
-        print (var.chrom+"\t"+var.pos)
+    if len(vars) > 1:
+        for var in vars:
+            print (str(var.chrom)+"\t"+str(var.pos)+"\t"+var.info['STRANDS'])
     
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
@@ -357,21 +358,21 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
             ospan = e2 - s1
 
             # write bedpe
-            bedpe_out.write('\t'.join(map(str,
-                                          [var.chrom,
-                                           s1,
-                                           e1,
-                                           mei_chrom,
-                                           s2,
-                                           e2,
-                                           var.info['EVENT'],
-                                           var.qual,
-                                           o1,
-                                           o2,
-                                           var.info['SVTYPE'],
-                                           var.filter] +
-                                           v[7:]
-                                          )) + '\n')
+            # bedpe_out.write('\t'.join(map(str,
+                                          # [var.chrom,
+                                           # s1,
+                                           # e1,
+                                           # mei_chrom,
+                                           # s2,
+                                           # e2,
+                                           # var.info['EVENT'],
+                                           # var.qual,
+                                           # o1,
+                                           # o2,
+                                           # var.info['SVTYPE'],
+                                           # var.filter] +
+                                           # v[7:]
+                                          # )) + '\n')
             
             
     # close the files
