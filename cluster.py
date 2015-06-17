@@ -259,8 +259,8 @@ class mei_call(object):
         #self.end = meilist[1][1]
         self.alt = meilist[2]
         self.strands = get_strands(self.alt)
-        self.mei = mei_list[3]
-        self.evs = mei_list[4]
+        self.mei = meilist[3]
+        self.evs = meilist[4]
                
 def get_strands(altstr):
     # 4 possible alt configurations:
@@ -309,26 +309,25 @@ def merge_meis(var_cluster):
                     new_alt = sep+mei_group+sep+"N"
                          
             #need to make a new variant here
-            chrom = variant[0].chrom
-            merged.append(mei_call([chrom, poslist, alt, SU, SR, PE]))
+            chrom = variants[0].chrom
+            merged.append(mei_call([chrom, poslist, new_alt, SU, SR, PE]))
             
-        if len(merged) > 1:
-            five = []
-            three = []
-            SR = False
-            for var in merged:
-                if var[4] > 0:
-                    SR = True
-                if var[1][0] == "+":
-                    five.append(min(var[2]))
-                elif var[1][0] == "-":
-                    three.append(max(var[2]))
-                    
-            if len(three) > 0 and len(five) > 0:
-                bstart = min(five+three)
-                bend = max(five+three)
-            
-            elif SR:
+       # if len(merged) > 1:
+       #     five = []
+       #     three = []
+       #     SR = False
+       #     for var in merged:
+       #            SR = True
+       #         if var[1][0] == "+":
+       #             five.append(min(var[2]))
+       #         elif var[1][0] == "-":
+       #             three.append(max(var[2]))
+       #             
+       #     if len(three) > 0 and len(five) > 0:
+       #         bstart = min(five+three)
+       #         bend = max(five+three)
+       #     
+       #    elif SR:
                 
 
 # primary function
