@@ -5,9 +5,9 @@ import math, time, re
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
 
-__author__ = "Colby Chiang (cc2qe@virginia.edu)"
+__author__ = "Ryan Smith (ryan.smith.p@gmail.com)"
 __version__ = "$Revision: 0.0.1 $"
-__date__ = "$Date: 2014-04-23 14:31 $"
+__date__ = "$Date: 2015-06-16 10:31 $"
 
 # --------------------------------------
 # define functions
@@ -250,17 +250,37 @@ class Genotype(object):
                 g_list.append('.')
         return ':'.join(map(str,g_list))
         
-class mei_Variant(object):
-    def __init__(self, varlist):
-        self.chrom = varlist[0]
-        self.pos = varlist[2]
-
         
+class mei_call(object):
+    def __init__(self, meilist):
+        self.chrom = meilist[0]
+        poslist = 
+        #self.start = meilist[1][0]
+        #self.end = meilist[1][1]
+        self.alt = meilist[2]
+        self.strands = get_strands(self.alt)
+        self.mei = mei_list[3]
+        self.evs = mei_list[4]
+               
+def get_strands(altstr):
+    # 4 possible alt configurations:
+    if altstr.startswith("N]"):
+        ref_strand, mei_strand = "+","+"
+    elif altstr.startswith("N["):
+        ref_strand, mei_strand = "+","-"
+    elif altstr.startswith("]"):
+        ref_strand, mei_strand = "-","+"
+    elif altstr.startswith("["):
+        ref_strand, mei_strand = "-","-"
+    return ref_strand,mei_strand
+    
+#def get_overlap(spanlist):
+#    overlap = 0
+#    for span in spanlist:
 def merge_meis(var_cluster):
     for mei_group in var_cluster:
         ori_groups = defaultdict(list)
         cluster = var_cluster[mei_group]
-        
         for var in cluster:
             ori_groups[var.alt[:2]].append(var)
         
@@ -269,14 +289,17 @@ def merge_meis(var_cluster):
             SU,SR,PE=0,0,0
             startlist = []
             poslist = []
-            endlist = []
             for var in variants:
                 SU += int(var.info['SU'])
                 SR += int(var.info['SR'])
                 PE += int(var.info['PE'])
                 poslist.append(var.pos)
-                startlist.append(var.info['CIPOS95'])
-                endlist.append(var.info['CIEND95'])
+                
+                span = map(int, var.info['CIPOS'].split(","))
+                s1 = var.pos + span[0] - 1
+                e1 = var.pos + span[1]
+                startlist.append((s1,e1))
+                
                 sep = "]"
                 if sep not in var.alt:
                     sep = "["
@@ -284,14 +307,29 @@ def merge_meis(var_cluster):
                     new_alt = "N"+sep+mei_group+sep
                 else:
                     new_alt = sep+mei_group+sep+"N"
-                    
+                         
             #need to make a new variant here
-            merged.append([new_alt, poslist, SU, SR, PE, startlist, endlist])
-
+            chrom = variant[0].chrom
+            merged.append(mei_call([chrom,poslist, SU, SR, PE]))
+            
         if len(merged) > 1:
+            five = []
+            three = []
+            SR = False
             for var in merged:
-                print(var)
-            print("")
+                if var[4] > 0:
+                    SR = True
+                if var[1][0] == "+":
+                    five.append(min(var[2]))
+                elif var[1][0] == "-":
+                    three.append(max(var[2]))
+                    
+            if len(three) > 0 and len(five) > 0:
+                bstart = min(five+three)
+                bend = max(five+three)
+            
+            elif SR:
+                
 
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
@@ -374,40 +412,7 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
                     var_cluster.clear()
             
             prev_var = var
-            var_cluster[mei_group].append(var)
-            
-            # strands = var.info['STRANDS']
-            # o1 = strands[0]
-            # o2 = strands[1]
-            # 
-            # span = map(int, var.info['CIPOS'].split(','))
-            # s1 = ref_break + span[0] - 1
-            # e1 = ref_break + span[1]
-            # 
-            # span = map(int, var.info['CIEND'].split(','))
-            # s2 = mei_break + span[0] - 1
-            # e2 = mei_break + span[1]
-            # 
-            # ispan = s2 - e1
-            # ospan = e2 - s1
-            # 
-            # #write bedpe
-            # bedpe_out.write('\t'.join(map(str,
-            #                               [var.chrom,
-            #                                 s1,
-            #                                 e1,
-            #                                 mei_chrom,
-            #                                 s2,
-            #                                 e2,
-            #                                 var.info['EVENT'],
-            #                                 var.qual,
-            #                                 o1,
-            #                                 o2,
-            #                                 var.info['SVTYPE'],
-            #                                 var.filter] +
-            #                                 v[7:]
-            #                               )) + '\n')
-            
+            var_cluster[mei_group].append(var)            
             
     # close the files
     bedpe_out.close()
