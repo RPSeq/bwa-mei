@@ -1,0 +1,5 @@
+# OUTPUT FILES #
+################
+*.bed
+*.vcf
+*.txt

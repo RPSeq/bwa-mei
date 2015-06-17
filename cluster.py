@@ -20,10 +20,10 @@ version: " + __version__ + "\n\
 description: Convert a VCF file to a BEDPE file")
     parser.add_argument('-i', '--input', type=argparse.FileType('r'), default=None, help='VCF input (default: stdin)')
     parser.add_argument('-o', '--output', type=argparse.FileType('w'), default=sys.stdout, help='Output BEDPE to write (default: stdout)')
-
+    
     # parse the arguments
     args = parser.parse_args()
-
+    
     # if no input, check if part of pipe and if so, read stdin.
     if args.input == None:
         if sys.stdin.isatty():
@@ -31,7 +31,7 @@ description: Convert a VCF file to a BEDPE file")
             exit(1)
         else:
             args.input = sys.stdin
-
+    
     # send back the user input
     return args
 
@@ -45,7 +45,7 @@ class Vcf(object):
         self.format_list = []
         self.alt_list = []
         self.add_format('GT', 1, 'String', 'Genotype')
-
+    
     def add_header(self, header):
         for line in header:
             if line.split('=')[0] == '##fileformat':
@@ -87,22 +87,22 @@ class Vcf(object):
                                       self.sample_list
                                   )])
         return header
-
+    
     def add_info(self, id, number, type, desc):
         if id not in [i.id for i in self.info_list]:
             inf = Info(id, number, type, desc)
             self.info_list.append(inf)
-
+    
     def add_alt(self, id, desc):
         if id not in [a.id for a in self.alt_list]:
             alt = Alt(id, desc)
             self.alt_list.append(alt)
-
+    
     def add_format(self, id, number, type, desc):
         if id not in [f.id for f in self.format_list]:
             fmt = Format(id, number, type, desc)
             self.format_list.append(fmt)
-
+    
     def add_sample(self, name):
         self.sample_list.append(name)
 
@@ -162,24 +162,24 @@ class Variant(object):
             s = self.sample_list[i]
             for j in zip(var_list[8].split(':'), var_list[9+i].split(':')):
                 self.gts[s].set_format(j[0], j[1])
-
+        
         self.info = dict()
         i_split = [a.split('=') for a in var_list[7].split(';')] # temp list of split info column
         for i in i_split:
             if len(i) == 1:
                 i.append(True)
             self.info[i[0]] = i[1]
-
+    
     def set_info(self, field, value):
         if field in [i.id for i in self.info_list]:
             self.info[field] = value
         else:
             sys.stderr.write('\nError: invalid INFO field, \"' + field + '\"\n')
             exit(1)
-
+    
     def get_info(self, field):
         return self.info[field]
-
+    
     def get_info_string(self):
         i_list = list()
         for info_field in self.info_list:
@@ -189,20 +189,20 @@ class Variant(object):
                 else:
                     i_list.append('%s=%s' % (info_field.id, self.info[info_field.id]))
         return ';'.join(i_list)
-
+    
     def get_format_string(self):
         f_list = list()
         for f in self.format_list:
             if f.id in self.active_formats:
                 f_list.append(f.id)
         return ':'.join(f_list)
-
+    
     def genotype(self, sample_name):
         if sample_name in self.sample_list:
             return self.gts[sample_name]
         else:
             sys.stderr.write('\nError: invalid sample name, \"' + sample_name + '\"\n')
-
+    
     def get_var_string(self):
         s = '\t'.join(map(str,[
             self.chrom,
@@ -223,7 +223,7 @@ class Genotype(object):
         self.format = dict()
         self.variant = variant
         self.set_format('GT', gt)
-
+    
     def set_format(self, field, value):
         if field in [i.id for i in self.variant.format_list]:
             self.format[field] = value
@@ -234,10 +234,10 @@ class Genotype(object):
         # else:
         #     sys.stderr.write('\nError: invalid FORMAT field, \"' + field + '\"\n')
         #     exit(1)
-
+    
     def get_format(self, field):
         return self.format[field]
-
+    
     def get_gt_string(self):
         g_list = list()
         for f in self.variant.active_formats:
@@ -250,18 +250,23 @@ class Genotype(object):
                 g_list.append('.')
         return ':'.join(map(str,g_list))
         
+#class mei_variant(object):        
+#    def __init__(call_list):
+#        self.chrom =
+#        self.pos =
+#        self.mei =
+#        self.evs =
         
 class mei_call(object):
+    #should also make a call group class to store these
     def __init__(self, meilist):
         self.chrom = meilist[0]
-        poslist = meilist[1]
-        #self.start = meilist[1][0]
-        #self.end = meilist[1][1]
+        self.poslist = meilist[1]
         self.alt = meilist[2]
-        self.strands = get_strands(self.alt)
         self.mei = meilist[3]
         self.evs = meilist[4]
-               
+        self.strands = get_strands(self.alt)
+
 def get_strands(altstr):
     # 4 possible alt configurations:
     if altstr.startswith("N]"):
@@ -273,10 +278,8 @@ def get_strands(altstr):
     elif altstr.startswith("["):
         ref_strand, mei_strand = "-","-"
     return ref_strand,mei_strand
-    
-#def get_overlap(spanlist):
-#    overlap = 0
-#    for span in spanlist:
+
+
 def merge_meis(var_cluster):
     for mei_group in var_cluster:
         ori_groups = defaultdict(list)
@@ -285,6 +288,8 @@ def merge_meis(var_cluster):
             ori_groups[var.alt[:2]].append(var)
         
         merged = []
+        #this will iterate over groups of calls that are the same element
+        #and in the same ref/mei orientation
         for ori, variants in ori_groups.viewitems():
             SU,SR,PE=0,0,0
             startlist = []
@@ -295,10 +300,11 @@ def merge_meis(var_cluster):
                 PE += int(var.info['PE'])
                 poslist.append(var.pos)
                 
-                span = map(int, var.info['CIPOS'].split(","))
-                s1 = var.pos + span[0] - 1
-                e1 = var.pos + span[1]
-                startlist.append((s1,e1))
+                #stuff to calculate CI span
+                #span = map(int, var.info['CIPOS'].split(","))
+                #s1 = var.pos + span[0] - 1
+                #e1 = var.pos + span[1]
+                #startlist.append((s1,e1))
                 
                 sep = "]"
                 if sep not in var.alt:
@@ -307,28 +313,55 @@ def merge_meis(var_cluster):
                     new_alt = "N"+sep+mei_group+sep
                 else:
                     new_alt = sep+mei_group+sep+"N"
-                         
+            
             #need to make a new variant here
             chrom = variants[0].chrom
-            merged.append(mei_call([chrom, poslist, new_alt, SU, SR, PE]))
+            callset = mei_call([chrom, poslist, new_alt, mei_group, {'SU':SU, 'SR':SR, 'PE':PE}])
+            merged.append(callset)
+       
+
+        five = []
+        three = []
+        SR = False
+        SU5,SU3,SR5,SR3,PE5,PE3=0,0,0,0,0,0
+        passed = False
+        for call in merged:
+            if call.evs['SR'] > 0:
+                SR = True
+            if call.strands[0] == "+":
+                five.append(min(call.poslist))
+                SU5+=call.evs['SU']
+                SR5+=call.evs['SR']
+                PE5+=call.evs['PE']
+            elif call.strands[0] == "-":
+                three.append(max(call.poslist))
+                SU3+=call.evs['SU']
+                SR3+=call.evs['SR']
+                PE3+=call.evs['PE']
+        
+        if SU5 > 0 and SU3 > 0:
+            bstart = min(five+three)
+            bend = max(five+three)
+            passed = True
             
-       # if len(merged) > 1:
-       #     five = []
-       #     three = []
-       #     SR = False
-       #     for var in merged:
-       #            SR = True
-       #         if var[1][0] == "+":
-       #             five.append(min(var[2]))
-       #         elif var[1][0] == "-":
-       #             three.append(max(var[2]))
-       #             
-       #     if len(three) > 0 and len(five) > 0:
-       #         bstart = min(five+three)
-       #         bend = max(five+three)
-       #     
-       #    elif SR:
+        elif SU5 > 0 and SU3 == 0 and SR:
+            bstart = min(five)
+            bend = max(five)
+            passed = True
+        
+        elif SU5 == 0 and SU3 > 0 and SR:
+            bstart = min(three)
+            bend = max(three)
+            passed = True
+        
+        if passed:
+            infostr = "SU5="+str(SU5)+";SU3="+str(SU3)+";SR5="+str(SR5)+";SR3="+str(SR3)+";PE5="+str(PE5)+";PE3="+str(PE3)
+            return [merged[0].chrom, str(bstart), str(bend), mei_group.split("_")[1], infostr]
+        else:
+            return False
+            
                 
+        
 
 # primary function
 def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
@@ -346,53 +379,20 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
                     sample_list = line.rstrip().split('\t')[9:]
                 continue
             else:
-                # print header
-                if len(sample_list) > 0:
-                    bedpe_out.write('\t'.join(['#CHROM_A',
-                                               'START_A',
-                                               'END_A',
-                                               'CHROM_B',
-                                               'START_B',
-                                               'END_B',
-                                               'ID',
-                                               'QUAL',
-                                               'STRAND_A',
-                                               'STRAND_B',
-                                               'TYPE',
-                                               'FILTER',
-                                               'INFO',
-                                               'FORMAT'] +
-                                               sample_list
-                                              ) + '\n')
-                else:
-                    bedpe_out.write('\t'.join(['#CHROM_A',
-                                               'START_A',
-                                               'END_A',
-                                               'CHROM_B',
-                                               'START_B',
-                                               'END_B',
-                                               'ID',
-                                               'QUAL',
-                                               'STRAND_A',
-                                               'STRAND_B',
-                                               'TYPE',
-                                               'FILTER',
-                                               'INFO']
-                                              ) + '\n')
-                    
+                bedpe_out.write("\t".join(["#CHROM","START","END","MEI","INFO"])+"\n")
                 in_header = False
                 vcf.add_header(header)
-
+        
         v = line.rstrip().split('\t')
         var = Variant(v, vcf)
-
+        
         if var.info['SVTYPE'] != 'BND':
             continue
-           
+        
         else:
             if mei_prefix in var.chrom:
                 continue
-
+            
             ref_break = var.pos
             sep = '['
             if sep not in var.alt:
@@ -407,16 +407,18 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
                 if (var.chrom == prev_var.chrom) and (var.pos - prev_var.pos < 0):
                     exit("Error: Input .vcf must be coordinate sorted!")
                 elif (var.chrom != prev_var.chrom) or (var.pos - prev_var.pos > window):
-                    merge_meis(var_cluster)
+                    merged = merge_meis(var_cluster)
+                    if merged:
+                        bedpe_out.write("\t".join(merged)+"\n")
                     var_cluster.clear()
             
             prev_var = var
-            var_cluster[mei_group].append(var)            
-            
+            var_cluster[mei_group].append(var)
+    
     # close the files
     bedpe_out.close()
     vcf_file.close()
-
+    
     return
 
 # --------------------------------------
@@ -425,7 +427,7 @@ def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
 def main():
     # parse the command line args
     args = get_args()
-
+    
     # call primary function
     vcfToBedpe(args.input, args.output)
 
