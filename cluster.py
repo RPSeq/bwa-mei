@@ -254,7 +254,7 @@ class Genotype(object):
 class mei_call(object):
     def __init__(self, meilist):
         self.chrom = meilist[0]
-        poslist = 
+        poslist = meilist[1]
         #self.start = meilist[1][0]
         #self.end = meilist[1][1]
         self.alt = meilist[2]
@@ -310,7 +310,7 @@ def merge_meis(var_cluster):
                          
             #need to make a new variant here
             chrom = variant[0].chrom
-            merged.append(mei_call([chrom,poslist, SU, SR, PE]))
+            merged.append(mei_call([chrom, poslist, alt, SU, SR, PE]))
             
         if len(merged) > 1:
             five = []
