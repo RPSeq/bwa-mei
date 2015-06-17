@@ -320,41 +320,35 @@ def merge_meis(var_cluster):
             merged.append(callset)
        
 
-        five = []
-        three = []
-        SR = False
+        #five = []
+        #three = []
+        breaks = []
         SU5,SU3,SR5,SR3,PE5,PE3=0,0,0,0,0,0
         passed = False
+        
         for call in merged:
-            if call.evs['SR'] > 0:
-                SR = True
+            breaks.extend(call.poslist)
             if call.strands[0] == "+":
-                five.append(min(call.poslist))
+                #five.append(min(call.poslist))
                 SU5+=call.evs['SU']
                 SR5+=call.evs['SR']
                 PE5+=call.evs['PE']
             elif call.strands[0] == "-":
-                three.append(max(call.poslist))
+                #three.append(max(call.poslist))
                 SU3+=call.evs['SU']
                 SR3+=call.evs['SR']
                 PE3+=call.evs['PE']
-        
-        if SU5 > 0 and SU3 > 0:
-            bstart = min(five+three)
-            bend = max(five+three)
+        SR = SR5+SR3    
+        PE = PE5+PE3
+        if SR < 2 and (PE5 > 2 and PE3 > 2):
             passed = True
+        if SR > 2:
+            passed = True
+        
             
-        elif SU5 > 0 and SU3 == 0 and SR:
-            bstart = min(five)
-            bend = max(five)
-            passed = True
-        
-        elif SU5 == 0 and SU3 > 0 and SR:
-            bstart = min(three)
-            bend = max(three)
-            passed = True
-        
         if passed:
+            bstart = min(breaks)
+            bend = max(breaks)
             infostr = "SU5="+str(SU5)+";SU3="+str(SU3)+";SR5="+str(SR5)+";SR3="+str(SR3)+";PE5="+str(PE5)+";PE3="+str(PE3)
             return [merged[0].chrom, str(bstart), str(bend), mei_group.split("_")[1], infostr]
         else:
