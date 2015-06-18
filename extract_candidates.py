@@ -8,15 +8,14 @@ import pysam
 import sys
 import argparse
 from argparse import RawTextHelpFormatter
-import string
-from string import *
+from string import maketrans
 
 __author__ = "Ryan Smith (ryanpsmith@wustl.edu) with code by Colby Chiang (cc2qe@virginia.edu)"
 __version__ = "$Revision: 0.0.1 $"
 __date__ = "$Date: 2014-12-15 11:43 $"
 
 #main loop function
-def extract_clippers(bamfile, is_sam, bam_out, uncompressed_out, anchors, realign_fq, clip_len, max_opp_clip=7):
+def extract_clippers(bamfile, is_sam, bam_out, uncompressed_out, anchors, single_fq, pair_fq, clip_len, max_opp_clip=7):
     # set input file
     clip_len = int(clip_len)
     if bamfile == None:
@@ -38,7 +37,8 @@ def extract_clippers(bamfile, is_sam, bam_out, uncompressed_out, anchors, realig
     else:
         anchors_out_bam = pysam.Samfile(anchors, 'wh', template=in_bam)
         
-    unanchors_out_fastq = open(realign_fq, 'w')
+    pair_fq = open(pair_fq, 'w')
+    single_fq = open(single_fq, 'w')
     
     mates = {}
     for al in in_bam:
@@ -48,7 +48,7 @@ def extract_clippers(bamfile, is_sam, bam_out, uncompressed_out, anchors, realig
             continue
         #if we flagged the mate, write the pair and remove from cache
         elif al.qname in mates:
-            write_pairs(al, mates[al.qname], anchors_out_bam, unanchors_out_fastq)
+            write_pairs(al, mates[al.qname], anchors_out_bam,single_fq, pair_fq)
             del mates[al.qname]
         #grab all non-proper pairs.
         elif not al.is_proper_pair:
@@ -66,12 +66,12 @@ def extract_clippers(bamfile, is_sam, bam_out, uncompressed_out, anchors, realig
             if cigar[0][0] == 4 and cigar[0][1] >= clip_len:
                 #if opposite is not clipped more than max opposite clip len, write for realignment
                 if cigar[-1][0] != 4 or (cigar[-1][0] == 4 and cigar[-1][1] <= max_opp_clip):
-                    write_clip(al, 'L', anchors_out_bam, unanchors_out_fastq)
+                    write_clip(al, 'L', anchors_out_bam, single_fq)
             #elif clipped at least clip_len on R:
             elif cigar[-1][0] == 4 and cigar[-1][1] >= clip_len:
                 #if opposite is not clipped more than max opposite clip len, write for realignment
                 if cigar[0][0] != 4 or (cigar[0][0] == 4 and cigar[0][1] <= max_opp_clip):
-                    write_clip(al, 'R', anchors_out_bam, unanchors_out_fastq)
+                    write_clip(al, 'R', anchors_out_bam, single_fq)
                     
     if len(mates) > 0:
         sys.stderr.write("Warning: {0} unmatched mates".format(len(mates)))
@@ -86,31 +86,31 @@ def reverse_complement(sequence):
     sequence = sequence[::-1].translate(complement)
     return sequence
 
-def write_fastq(al, realign_fq) :
+def write_fastq(al, fq) :
     seq = al.seq
     quals = al.qual
     if al.is_reverse:
         seq = reverse_complement(seq)
         quals = quals[::-1]
-    realign_fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
+    fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
     
-def write_pairs(al1, al2, anchors, realign_fq):
+def write_pairs(al1, al2, anchors, single_fq, pair_fq):
     #both reads uniquely mapped
     if al1.mapq > 0 and al2.mapq > 0:
         #realign both
-        write_fastq(al1, realign_fq)
-        write_fastq(al2, realign_fq)
+        write_fastq(al1, pair_fq)
+        write_fastq(al2, pair_fq)
     elif al1.mapq == 0 and al2.mapq > 0:
         #realign al1
-        write_fastq(al1, realign_fq)
+        write_fastq(al1, single_fq)
         anchors.write(al2)
     elif al1.mapq > 0 and al2.mapq == 0:
         #realign al2
         anchors.write(al1)
-        write_fastq(al2, realign_fq)
+        write_fastq(al2, single_fq)
     return
     
-def write_clip(al, side, anchors, realign_fq):
+def write_clip(al, side, anchors, single_fq):
     if side=="L":
         seq = al.seq[:al.qstart]
         quals = al.qual[:al.qstart]
@@ -126,7 +126,7 @@ def write_clip(al, side, anchors, realign_fq):
     elif al.is_read2:
         al.qname += "_2"
     anchors.write(al)
-    realign_fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
+    single_fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
     return
     
 def get_args():
@@ -137,7 +137,8 @@ version: " + __version__ + "\n\
 description: Extract candidates for MEI re-alignment")
     parser.add_argument('-i', '--input', metavar='BAM', required=False, help='Input BAM file')
     parser.add_argument('-a', '--anchors', required=True, help='Output anchors bamfile')
-    parser.add_argument('-fq', '--fq', required=True, help='Output unanchors fastq')
+    parser.add_argument('-s', '--single', required=True, help='Output single-read unanchors fastq')
+    parser.add_argument('-p', '--pair', required=True, help='Output paired-read unanchors fastq')
     parser.add_argument('-c', '--clip', required=True, type=int, help='Minimum clip length')
     parser.add_argument('-oc', '--opp_clip', required=False, type=int, help='Max opposite clip length')
     parser.add_argument('-S', required=False, action='store_true', help='Input is SAM format')
@@ -165,7 +166,7 @@ class Usage(Exception):
 
 def main():
     args = get_args()
-    extract_clippers(args.input, args.S, args.b, args.u, args.anchors, args.fq, args.clip, args.opp_clip)
+    extract_clippers(args.input, args.S, args.b, args.u, args.anchors, args.single, args.pair, args.clip, args.opp_clip)
 
 if __name__ == "__main__":
     try:
