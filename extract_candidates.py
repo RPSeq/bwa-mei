@@ -15,7 +15,8 @@ __author__ = "Ryan Smith (ryanpsmith@wustl.edu) with code by Colby Chiang (cc2qe
 __version__ = "$Revision: 0.0.1 $"
 __date__ = "$Date: 2014-12-15 11:43 $"
 
-def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, split_anchorfile, clip_len):
+#main loop function
+def extract_clippers(bamfile, is_sam, bam_out, uncompressed_out, anchors, realign_fq, clip_len, max_opp_clip=7):
     # set input file
     clip_len = int(clip_len)
     if bamfile == None:
@@ -29,64 +30,53 @@ def extract_clippers(bamfile, is_sam, anchorfile, unanchorfile, split_anchorfile
         else:
             in_bam = pysam.Samfile(bamfile, "rb")
     
-    exclude_bam = pysam.Samfile(split_anchorfile, "rb")
+    # set output file
+    if uncompressed_out:
+        anchors_out_bam = pysam.Samfile(anchors, 'wbu', template=in_bam)
+    elif bam_out:
+        anchors_out_bam = pysam.Samfile(anchors, 'wb', template=in_bam)
+    else:
+        anchors_out_bam = pysam.Samfile(anchors, 'wh', template=in_bam)
+        
+    unanchors_out_fastq = open(realign_fq, 'w')
     
-    unanchors_out_fastq = open(unanchorfile, 'w')
-    anchors_out_bam = pysam.Samfile(anchorfile, 'wb', template=in_bam)
-    
-    excludes = set()
-    for al in exclude_bam:
-        excludes.add(al.qname)
-    
+    mates = {}
     for al in in_bam:
         # add read name to dictionary if not already there
-        if al.is_secondary:
+        #not interested in secondary alignments
+        if al.is_secondary or al.is_duplicate:
             continue
-        #arbitrary mapq cutoff
-        if al.mapq > 0 or not al.is_unmapped:
-            ##skip if there are secondaries
-            #try:
-            #    SA = al.opt('SA')
-            #    continue
-            #except:
-            #    pass
-                
-            if al.is_read1:
-                al.qname = al.qname + "_1"
-            elif al.is_read2:
-                al.qname = al.qname + "_2"
-            if al.qname in excludes:
-                continue
-                
+        #if we flagged the mate, write the pair and remove from cache
+        elif al.qname in mates:
+            write_pairs(al, mates[al.qname], anchors_out_bam, unanchors_out_fastq)
+            del mates[al.qname]
+        #grab all non-proper pairs.
+        elif not al.is_proper_pair:
+            mates[al.qname] = al
+        #might be some signal here too... one end unique, one end repeat, but still flagged as proper_pair
+        elif (al.mapq >= 10 and dict(al.tags)['MQ'] < 10) or (al.mapq < 10 and dict(al.tags)['MQ'] >= 10):
+            mates[al.qname] = al 
+        
+        #this case: proper pair, unique mapping. check for clips, if so, flag the read
+        elif al.mapq > 0:
+            cigar = al.cigar
             #NOTE cigar = tuple list format [(0,14),(4,20)], cigarstr = string format
             #cigar_dict = {0:'M',1:'I',2:'D',3:'N',4:'S',5:'H',6:'P',7:'=',8:'X'}
-            cigar = al.cigar
-            clip_L = False
-            clip_R = False
-            #if clipped at least clip_len at al start or end:
+            #if clipped at least clip_len on L:
             if cigar[0][0] == 4 and cigar[0][1] >= clip_len:
-                clip_L = True
+                #if opposite is not clipped more than max opposite clip len, write for realignment
+                if cigar[-1][0] != 4 or (cigar[-1][0] == 4 and cigar[-1][1] <= max_opp_clip):
+                    write_clip(al, 'L', anchors_out_bam, unanchors_out_fastq)
+            #elif clipped at least clip_len on R:
             elif cigar[-1][0] == 4 and cigar[-1][1] >= clip_len:
-                clip_R = True
-            if (clip_L and clip_R) or (not clip_L and not clip_R):
-                continue
-            if (clip_L or clip_R):
-                if clip_L:
-                    sequence = al.seq[:al.qstart]
-                    quals = al.qual[:al.qstart]
-                elif clip_R:
-                    sequence = al.seq[al.qend:]
-                    quals = al.qual[al.qend:]
-                if al.is_reverse:
-                    sequence = reverse_complement(sequence)
-                    quals = quals[::-1]
-                    #cigar = cigar[::-1]
-                    #al.cigar = None
-                    #al.cigar = cigar
-                unanchors_out_fastq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+sequence+"\n+\n"+quals+"\n")
-                anchors_out_bam.write(al)
-
-
+                #if opposite is not clipped more than max opposite clip len, write for realignment
+                if cigar[0][0] != 4 or (cigar[0][0] == 4 and cigar[0][1] <= max_opp_clip):
+                    write_clip(al, 'R', anchors_out_bam, unanchors_out_fastq)
+                    
+    if len(mates) > 0:
+        sys.stderr.write("Warning: {0} unmatched mates".format(len(mates)))
+            
+                
 # ============================================
 # functions
 # ============================================
@@ -96,18 +86,63 @@ def reverse_complement(sequence):
     sequence = sequence[::-1].translate(complement)
     return sequence
 
+def write_fastq(al, realign_fq) :
+    seq = al.seq
+    quals = al.qual
+    if al.is_reverse:
+        seq = reverse_complement(seq)
+        quals = quals[::-1]
+    realign_fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
+    
+def write_pairs(al1, al2, anchors, realign_fq):
+    #both reads uniquely mapped
+    if al1.mapq > 0 and al2.mapq > 0:
+        #realign both
+        write_fastq(al1, realign_fq)
+        write_fastq(al2, realign_fq)
+    elif al1.mapq == 0 and al2.mapq > 0:
+        #realign al1
+        write_fastq(al1, realign_fq)
+        anchors.write(al2)
+    elif al1.mapq > 0 and al2.mapq == 0:
+        #realign al2
+        anchors.write(al1)
+        write_fastq(al2, realign_fq)
+    return
+    
+def write_clip(al, side, anchors, realign_fq):
+    if side=="L":
+        seq = al.seq[:al.qstart]
+        quals = al.qual[:al.qstart]
+    elif side=="R":
+        seq = al.seq[al.qend:]
+        quals = al.qual[al.qend:]
+    if al.is_reverse:
+        seq = reverse_complement(seq)
+        quals = quals[::-1]
+        
+    if al.is_read1:
+        al.qname += "_1"
+    elif al.is_read2:
+        al.qname += "_2"
+    anchors.write(al)
+    realign_fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
+    return
+    
 def get_args():
     parser = argparse.ArgumentParser(formatter_class=RawTextHelpFormatter, description="\
 bamgroupreads.py\n\
 author: " + __author__ + "\n\
 version: " + __version__ + "\n\
-description: Group BAM file by read IDs without sorting")
+description: Extract candidates for MEI re-alignment")
     parser.add_argument('-i', '--input', metavar='BAM', required=False, help='Input BAM file')
-    parser.add_argument('-S', required=False, action='store_true', help='Input is SAM format')
     parser.add_argument('-a', '--anchors', required=True, help='Output anchors bamfile')
-    parser.add_argument('-e', '--exclude', required=True, help='Input split anchors bamfile to exclude these reads')
-    parser.add_argument('-u', '--unanchors', required=True, help='Output unanchors fastq')
-    parser.add_argument('-c', '--clip', required=True, help='Minimum clip length')
+    parser.add_argument('-fq', '--fq', required=True, help='Output unanchors fastq')
+    parser.add_argument('-c', '--clip', required=True, type=int, help='Minimum clip length')
+    parser.add_argument('-oc', '--opp_clip', required=False, type=int, help='Max opposite clip length')
+    parser.add_argument('-S', required=False, action='store_true', help='Input is SAM format')
+    parser.add_argument('-b', required=False, action='store_true', help='Output BAM format')
+    parser.add_argument('-u', required=False, action='store_true', help='Output uncompressed BAM format (implies -b)')
     # parse the arguments
     args = parser.parse_args()
     
@@ -130,7 +165,7 @@ class Usage(Exception):
 
 def main():
     args = get_args()
-    extract_clippers(args.input, args.S, args.anchors, args.unanchors, args.exclude,  args.clip)
+    extract_clippers(args.input, args.S, args.b, args.u, args.anchors, args.fq, args.clip, args.opp_clip)
 
 if __name__ == "__main__":
     try:
