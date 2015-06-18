@@ -3,3 +3,7 @@
 *.bed
 *.vcf
 *.txt
+*.bam
+*.fq
+*.fastq
+*.sam
