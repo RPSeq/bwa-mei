@@ -261,10 +261,11 @@ class mei_call(object):
     #should also make a call group class to store these
     def __init__(self, meilist):
         self.chrom = meilist[0]
-        self.poslist = meilist[1]
-        self.alt = meilist[2]
-        self.mei = meilist[3]
-        self.evs = meilist[4]
+        self.startlist = meilist[1]
+        self.endlist = meilist[2]
+        self.alt = meilist[3]
+        self.mei = meilist[4]
+        self.evs = meilist[5]
         self.strands = get_strands(self.alt)
 
 def get_strands(altstr):
@@ -294,6 +295,7 @@ def merge_meis(var_cluster):
             SU,SR,PE=0,0,0
             startlist = []
             poslist = []
+            endlist = []
             for var in variants:
                 SU += int(var.info['SU'])
                 SR += int(var.info['SR'])
@@ -301,10 +303,11 @@ def merge_meis(var_cluster):
                 poslist.append(var.pos)
                 
                 #stuff to calculate CI span
-                #span = map(int, var.info['CIPOS'].split(","))
-                #s1 = var.pos + span[0] - 1
-                #e1 = var.pos + span[1]
-                #startlist.append((s1,e1))
+                span = map(int, var.info['CIPOS95'].split(","))
+                s1 = var.pos + span[0] - 1
+                e1 = var.pos + span[1]
+                startlist.append(s1)
+                endlist.append(e1)
                 
                 sep = "]"
                 if sep not in var.alt:
@@ -316,18 +319,20 @@ def merge_meis(var_cluster):
             
             #need to make a new variant here
             chrom = variants[0].chrom
-            callset = mei_call([chrom, poslist, new_alt, mei_group, {'SU':SU, 'SR':SR, 'PE':PE}])
+            callset = mei_call([chrom, startlist, endlist, new_alt, mei_group, {'SU':SU, 'SR':SR, 'PE':PE}])
             merged.append(callset)
        
 
         #five = []
         #three = []
-        breaks = []
+        starts = []
+        ends = []
         SU5,SU3,SR5,SR3,PE5,PE3=0,0,0,0,0,0
-        passed = False
+        
         
         for call in merged:
-            breaks.extend(call.poslist)
+            starts.extend(call.startlist)
+            ends.extend(call.endlist)
             if call.strands[0] == "+":
                 #five.append(min(call.poslist))
                 SU5+=call.evs['SU']
@@ -340,15 +345,16 @@ def merge_meis(var_cluster):
                 PE3+=call.evs['PE']
         SR = SR5+SR3    
         PE = PE5+PE3
-        if SR < 2 and (PE5 > 2 and PE3 > 2):
+        passed = False
+        if SR > 0:
             passed = True
-        if SR > 2:
+        if SR < 1 and (PE > 2):
             passed = True
         
             
         if passed:
-            bstart = min(breaks)
-            bend = max(breaks)
+            bstart = min(startlist)
+            bend = max(endlist)
             infostr = "SU5="+str(SU5)+";SU3="+str(SU3)+";SR5="+str(SR5)+";SR3="+str(SR3)+";PE5="+str(PE5)+";PE3="+str(PE3)
             return [merged[0].chrom, str(bstart), str(bend), mei_group.split("_")[1], infostr]
         else:
@@ -358,7 +364,7 @@ def merge_meis(var_cluster):
         
 
 # primary function
-def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=100):
+def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=200):
     vcf = Vcf()
     in_header = True
     header = []
