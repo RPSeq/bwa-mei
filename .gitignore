@@ -7,3 +7,6 @@
 *.fq
 *.fastq
 *.sam
+*.histo.out
+*.err
+*.stdout
