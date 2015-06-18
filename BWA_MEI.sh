@@ -44,6 +44,10 @@ else
     mkdir ${RESULTS_DIR}
 fi
 
+#	b. Get insert size distribution file
+HIST_OUT=$(samtools view ${INPUT_BAM} | head -n 1000000 | tail -n 100000 | python $SCRIPTS_DIR/pairend_distro.py -r 101 -X 4 -N 100000 -o ${RESULTS_DIR}/${PREFIX}.histo.out)
+MEAN=$(echo $HIST_OUT | tr ' ' '\n'  | cut -f 2 -d ":" | tr '\n' '\t' | cut -f 1)
+STDEV=$(echo $HIST_OUT | tr ' ' '\n'  | cut -f 2 -d ":" | tr '\n' '\t' | cut -f 2)
 
 # 1. get MEI candidates
 sambamba view -t 2 -f bam -l 0 -F "\
@@ -88,12 +92,6 @@ samtools sort ${RESULTS_DIR}/${PREFIX}.disc.repaired.merged.bam ${RESULTS_DIR}/$
 OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged.bam | wc -l)";
 OUTPUT=$((OUTPUT/2));
 echo -e "Total read-pairs fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-#	b. Get insert size distribution file
-samtools view ${INPUT_BAM} \
-| head -n 1000000 \
-| tail -n 100000 \
-| python $SCRIPTS_DIR/pairend_distro.py -r 101 -X 4 -N 100000 -o ${RESULTS_DIR}/${PREFIX}.histo.out;
 
 #extract and align splitters
 python ${SCRIPTS_DIR}/extract_splitters.py -c 20 -i ${SPLITTERS} -a ${RESULTS_DIR}/${PREFIX}.split.anchors.bam -u /dev/stdout | bwa mem -t 8 -k 11 -M -C ${MEI_REF} - | \
