@@ -4,6 +4,7 @@
 *.vcf
 *.txt
 *.bam
+*.bam.bai
 *.fq
 *.fastq
 *.sam
