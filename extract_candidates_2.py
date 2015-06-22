@@ -83,6 +83,7 @@ def get_sam_IO(bamfile, is_sam):
     return in_bam
                
 #main worker function
+#REALLY need to stop using the mates dict, this slows down the workers badly
 def al_scanner(readQueue, writeQueue, mates, clip_len, max_opp_clip):
     while True:
         als = readQueue.get()
@@ -100,7 +101,7 @@ def al_scanner(readQueue, writeQueue, mates, clip_len, max_opp_clip):
                 #write_pairs(al, mates[al.qname], anchors_out,single_fq, pair_fq)
                 del mates[al.qname]
             #grab all non-proper pairs.
-            elif not al.is_proper_pair:
+            elif not al.is_paired and not al.is_proper_pair:
                 mates[al.qname] = al
             #might be some signal here too... one end unique, one end repeat, but still flagged as proper_pair
             elif (al.mapq >= 10 and al.tags['MQ'] < 10) or (al.mapq < 10 and al.tags['MQ'] >= 10):
@@ -129,6 +130,8 @@ def bam_reader(in_bam, chunk, readQueue, workers):
     als = []
     i = 0
     for al in in_bam:
+        if al.is_duplicate or al.is_secondary:
+            continue
         al = sam_al(al, in_bam)
         als.append(al)
         i+=1
