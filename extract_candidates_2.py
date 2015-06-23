@@ -18,15 +18,18 @@ def main():
 
     #get IO streams
     in_bam = get_sam_IO(args.input, args.S)
+
+    #get header from in_bam, making sure to change to SO:unsorted
     header = "@HD\tVN:1.3\tSO:unsorted\n"
     header+="\n".join(in_bam.text.split("\n")[1:])
     
     #Open read and write queues
+    #size = 4000*(1024*1024)
     readQueue = Queue()
     writeQueue = Queue()
 
     #Create reader and writer processes
-    reader = Process(target=bam_reader, args=((in_bam, 10000, readQueue, args.t)))
+    reader = Process(target=bam_reader, args=((in_bam, 1000, readQueue, args.t)))
     writer = Process(target=bam_writer, args=((writeQueue, header, args.t, args.anchors, args.single, args.pair)))
 
     #Start them first
@@ -82,12 +85,10 @@ def al_scanner(readQueue, writeQueue, clip_len, max_opp_clip):
         if als == 'DONE':
             writeQueue.put('DONE')
             return
+        #don't let queue get too big
         while int(writeQueue.qsize()) > 2000:
-            #sys.stderr.write("writeQueue Waiting...\n")
+            sys.stderr.write("readQueue Waiting...\n")
             time.sleep(0.1)
-            #currently my writer process is very slow. this prevents massive memory usage.
-            #can specify max queue size with Queue(size) but this way is more flexible.
-
         for al in als:
             #grab all non-proper pairs.
             if not al.is_paired and not al.is_proper_pair:
@@ -128,9 +129,9 @@ def bam_reader(in_bam, chunk, readQueue, workers):
             als = []
             i = 0
             #don't let queue get too big
-            while int(readQueue.qsize()) > 10:
+            #while int(readQueue.qsize()) > 10:
                 #sys.stderr.write("readQueue Waiting...\n")
-                time.sleep(0.01)
+                #time.sleep(0.01)
     readQueue.put(als)
     #each worker must recieve a 'DONE' token in order to exit
     for i in range(workers):
@@ -146,58 +147,69 @@ def bam_writer(writeQueue, header, workers, anchors_out, single_fq, pair_fq):
     finished = 0
     mates = {}
     anchors.write(header)
+    sam_batch = ""
+    single_batch = ""
+    pair_batch = ""
+    count = 0
     while finished < workers:
         writelist = writeQueue.get()
+        if count == 200:
+            anchors.write(sam_batch)
+            single_fq.write(single_batch)
+            pair_fq.write(pair_batch)
+            sam_batch = ""
+            single_batch = ""
+            pair_batch = ""
+            count = 0
         if writelist == 'DONE':
             finished+=1
             continue
         if writelist[0] == 'write_clip':
-            write_clip(writelist[1:], anchors, single_fq)
+            fastq, sam = write_clip(writelist[1:], anchors, single_fq)
+
         elif writelist[0] == 'write_pairs':
             #if we have the mate, call write_pairs
             al = writelist[1]
             name = al.qname
             if name in mates:
-                write_pairs(al, mates[name], anchors, single_fq, pair_fq)
-                del mates[writelist[1].qname]
+                tag, fastq, sam = write_pairs(al, mates[name], anchors, single_fq, pair_fq)
+                if tag == 'paired':
+                    pair_batch += fastq
+                elif tag == 'single':
+                    single_batch += fastq
+                    sam_batch += sam
+                del mates[name]
             else:
-                mates[writelist[1].qname]=writelist[1]
+                mates[name] = al
+            count+=1
+
+    anchors.write(sam_batch)
+    single_fq.write(single_batch)
+    pair_fq.write(pair_batch)
     anchors.close()
     single_fq.close()
     pair_fq.close()
     if len(mates) > 0:
         sys.stderr.write("Warning: {0} unmatched paired reads in bam.".format(len(mates)))
     return
-
-def reverse_complement(sequence):
-    complement = maketrans("ACTGactg", "TGACtgac")
-    sequence = sequence[::-1].translate(complement)
-    return sequence
-
-def write_fastq(al, fq) :
-    seq = al.seq
-    quals = al.qual
-    if al.is_reverse:
-        seq = reverse_complement(seq)
-        quals = quals[::-1]
-    fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
-    return
     
 def write_pairs(al1, al2, anchors, single_fq, pair_fq):
     #both reads uniquely mapped
     if al1.mapq > 0 and al2.mapq > 0:
         #realign both
-        write_fastq(al1, pair_fq)
-        write_fastq(al2, pair_fq)
+        fastq = al1.fastq()
+        fastq += al2.fastq()
+        return ('paired', fastq, None)
     elif al1.mapq == 0 and al2.mapq > 0:
         #realign al1
-        write_fastq(al1, single_fq)
-        al2.write(anchors)
+        fastq = al1.fastq()
+        sam = al2.sam_str()
+        return ('single', fastq, sam)
     elif al1.mapq > 0 and al2.mapq == 0:
         #realign al2
-        al1.write(anchors)
-        write_fastq(al2, single_fq)
-    return
+        sam = al1.sam_str()
+        fastq = al2.fastq()
+        return ('single', fastq, sam)
     
 def write_clip(writelist, anchors, single_fq):
     al, side = writelist
@@ -215,10 +227,15 @@ def write_clip(writelist, anchors, single_fq):
         al.qname += "_1"
     elif al.is_read2:
         al.qname += "_2"
-    al.write(anchors)
-    single_fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
-    return
-    
+    sam = al.sam_str()
+    fastq = "@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n"
+    return (fastq, sam)
+
+def reverse_complement(sequence):
+    complement = maketrans("ACTGactg", "TGACtgac")
+    sequence = sequence[::-1].translate(complement)
+    return sequence
+
 def get_args():
     parser = argparse.ArgumentParser(formatter_class=RawTextHelpFormatter, description="\
                                             extract_candidates.py\n\
@@ -319,6 +336,15 @@ class sam_al(object):
                 ttype = 'Z'
             outlist.append("{0}:{1}:{2}".format(tag, ttype, val))
         return "\t".join(outlist)+"\n"
+
+    def fastq(self):
+        seq = self.seq
+        quals = self.qual
+        if self.is_reverse:
+            seq = reverse_complement(seq)
+            quals = quals[::-1]
+        fq = "@"+self.qname+" OC:Z:"+self.cigarstring+"\n"+seq+"\n+\n"+quals+"\n"
+        return fq
 
     def write(self, output):
         line = self.sam_str()
