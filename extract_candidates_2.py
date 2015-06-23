@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
-import pysam
-import sys
-import argparse
+import pysam, sys, argparse, time
 from argparse import RawTextHelpFormatter
 from string import maketrans
 from multiprocessing import Process, Pool, Manager, Queue, Lock
@@ -20,43 +18,34 @@ def main():
 
     #get IO streams
     in_bam = get_sam_IO(args.input, args.S)
-    #define the output streams
 
     #Open read and write queues
     readQueue = Queue()
     writeQueue = Queue()
 
-    workers = args.t
-    if workers==1:
-        mates = dict()
-    elif workers>1:
-        manager = Manager()
-        mates = manager.dict()
-    else:
-        exit("Must have at least 1 thread")
-
-
     #Create reader and writer processes
-    reader = Process(target=bam_reader, args=((in_bam, 100, readQueue, workers)))
-    writer = Process(target=bam_writer, args=((writeQueue, workers, args.anchors, args.single, args.pair)))
+    reader = Process(target=bam_reader, args=((in_bam, 10000, readQueue, args.t)))
+    writer = Process(target=bam_writer, args=((writeQueue, args.t, args.anchors, args.single, args.pair)))
 
     #Start them first
     reader.start()
     writer.start()
 
     #Start pool of worker processes
-    worker = Pool(workers, al_scanner, ((readQueue, writeQueue, mates, args.clip, args.opclip)))
+    worker = Pool(args.t, al_scanner, ((readQueue, writeQueue, args.clip, args.opclip)))
 
-
+    #wait for reader to finish
     reader.join()
 
+    #wait for workers to finish
     worker.close()
     worker.join()
 
+    #wait for writer to finish
     writer.join()
 
-    if len(mates) > 0:
-         sys.stderr.write("Warning: {0} unmatched mates".format(len(mates)))
+    #end
+    return 0
 
 # ============================================
 # functions
@@ -84,28 +73,29 @@ def get_sam_IO(bamfile, is_sam):
                
 #main worker function
 #REALLY need to stop using the mates dict, this slows down the workers badly
-def al_scanner(readQueue, writeQueue, mates, clip_len, max_opp_clip):
+def al_scanner(readQueue, writeQueue, clip_len, max_opp_clip):
+
     while True:
-        als = readQueue.get()
+        als = readQueue.get() 
         if als == 'DONE':
             writeQueue.put('DONE')
             return
+        while int(writeQueue.qsize()) > 10:
+            sys.stderr.write("writeQueue Waiting...\n")
+            time.sleep(0.01)
         for al in als:
             # add read name to dictionary if not already there
             #not interested in secondary alignments
-            if al.is_secondary or al.is_duplicate:
-                continue
-            #if we flagged the mate, write the pair and remove from cache
-            elif al.qname in mates:
-                writeQueue.put(('write_pairs', al, mates[al.qname]))
-                #write_pairs(al, mates[al.qname], anchors_out,single_fq, pair_fq)
-                del mates[al.qname]
+            #if al.is_secondary or al.is_duplicate:
+                #continue
+
             #grab all non-proper pairs.
-            elif not al.is_paired and not al.is_proper_pair:
-                mates[al.qname] = al
+            if not al.is_paired and not al.is_proper_pair:
+                writeQueue.put(('write_pairs', al))
+
             #might be some signal here too... one end unique, one end repeat, but still flagged as proper_pair
             elif (al.mapq >= 10 and al.tags['MQ'] < 10) or (al.mapq < 10 and al.tags['MQ'] >= 10):
-                mates[al.qname] = al 
+                writeQueue.put(('write_pairs', al))
             
             #this case: proper pair, unique mapping. check for clips, if so, flag the read
             elif al.mapq > 0:
@@ -117,14 +107,12 @@ def al_scanner(readQueue, writeQueue, mates, clip_len, max_opp_clip):
                     #if opposite is not clipped more than max opposite clip len, write for realignment
                     if cigar[-1][0] != 4 or (cigar[-1][0] == 4 and cigar[-1][1] <= max_opp_clip):
                         writeQueue.put(('write_clip', al, 'L'))
-                        #write_clip(al, 'L', anchors_out, single_fq)
+                        
                 #elif clipped at least clip_len on R:
                 elif cigar[-1][0] == 4 and cigar[-1][1] >= clip_len:
                     #if opposite is not clipped more than max opposite clip len, write for realignment
                     if cigar[0][0] != 4 or (cigar[0][0] == 4 and cigar[0][1] <= max_opp_clip):
-                        #write_clip(al, 'R', anchors_out, single_fq)
                         writeQueue.put(('write_clip', al, 'R'))
-
 
 def bam_reader(in_bam, chunk, readQueue, workers):
     als = []
@@ -139,6 +127,10 @@ def bam_reader(in_bam, chunk, readQueue, workers):
             readQueue.put(als)
             als = []
             i = 0
+            #don't let queue get too big
+            while int(readQueue.qsize()) > 10:
+                sys.stderr.write("readQueue Waiting...\n")
+                time.sleep(0.01)
     readQueue.put(als)
     #each worker must recieve a 'DONE' token in order to exit
     for i in range(workers):
@@ -151,6 +143,7 @@ def bam_writer(writeQueue, workers, anchors_out, single_fq, pair_fq):
     single_fq = open(single_fq, 'w+')
     pair_fq = open(pair_fq, 'w+')
     finished = 0
+    mates = {}
     while finished < workers:
         writelist = writeQueue.get()
         if writelist == 'DONE':
@@ -159,10 +152,19 @@ def bam_writer(writeQueue, workers, anchors_out, single_fq, pair_fq):
         if writelist[0] == 'write_clip':
             write_clip(writelist[1:], anchors, single_fq)
         elif writelist[0] == 'write_pairs':
-            write_pairs(writelist[1:], anchors, single_fq, pair_fq)
+            #if we have the mate, call write_pairs
+            al = writelist[1]
+            name = al.qname
+            if name in mates:
+                write_pairs(al, mates[name], anchors, single_fq, pair_fq)
+                del mates[writelist[1].qname]
+            else:
+                mates[writelist[1].qname]=writelist[1]
     anchors.close()
     single_fq.close()
     pair_fq.close()
+    if len(mates) > 0:
+        sys.stderr.write("Warning: {0} unmatched paired reads in bam.".format(len(mates)))
     return
 
 def reverse_complement(sequence):
@@ -178,8 +180,7 @@ def write_fastq(al, fq) :
         quals = quals[::-1]
     fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
     
-def write_pairs(writelist, anchors, single_fq, pair_fq):
-    al1, al2 = writelist
+def write_pairs(al1, al2, anchors, single_fq, pair_fq):
     #both reads uniquely mapped
     if al1.mapq > 0 and al2.mapq > 0:
         #realign both
@@ -248,6 +249,7 @@ def get_args():
 # ====================
 class sam_al(object):
     def __init__(self, sam, in_sam=False):
+
         #case: input is pysam al
         if type(sam)==pysam.AlignedRead and type(in_sam)==pysam.Samfile:
                 self.read_pysam(sam, in_sam)
@@ -259,25 +261,23 @@ class sam_al(object):
             exit("Error, sam_al() requires list, str, or pysam.Samfile objects as input")
         else:
             exit("Error: sam_al requires pysam.Samfile AND pysam.AlignedRead")
-        return 
-
-        self.qname = sam[0]
-        self.flag = int(sam[1])
-        self.rname = sam[2]
-        self.pos = int(sam[3])
-        self.mapq = int(sam[4])
-        self.cigar = sam[5]
-        self.rnext = sam[6]
-        self.pnext = sam[7]
-        self.tlen = int(sam[8])
-        self.seq = sam[9]
-        self.qual = sam[10]
-        self.tags = {}
-        for i in range(10,len(sam)):
-            tag, ttype, val = sam[i].split(":")
-            tags[tag]=(ttype, val)
+        
+        # self.qname = sam[0]
+        # self.flag = int(sam[1])
+        # self.rname = sam[2]
+        # self.pos = int(sam[3])
+        # self.mapq = int(sam[4])
+        # self.cigar = sam[5]
+        # self.rnext = sam[6]
+        # self.pnext = sam[7]
+        # self.tlen = int(sam[8])
+        # self.seq = sam[9]
+        # self.qual = sam[10]
+        # self.tags = {}
+        # for i in range(10,len(sam)):
+        #     tag, ttype, val = sam[i].split(":")
+        #     tags[tag]=(ttype, val)
         return
-
 
     def read_pysam(self, al, in_sam):
         self.qname = al.qname
@@ -301,6 +301,7 @@ class sam_al(object):
         self.qstart = al.qstart
         self.qend = al.qend
         self.is_reverse = al.is_reverse
+        self.is_paired = al.is_paired
 
     def write(self, output):
         outlist = [self.qname, str(self.flag), self.rname, 
