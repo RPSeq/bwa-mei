@@ -82,13 +82,11 @@ def al_scanner(readQueue, writeQueue, clip_len, max_opp_clip):
             return
         while int(writeQueue.qsize()) > 10:
             sys.stderr.write("writeQueue Waiting...\n")
-            time.sleep(0.01)
-        for al in als:
-            # add read name to dictionary if not already there
-            #not interested in secondary alignments
-            #if al.is_secondary or al.is_duplicate:
-                #continue
+            time.sleep(0.1)
+            #currently my writer process is very slow. this prevents massive memory usage.
+            #can specify max queue size with Queue(size) but this way is more flexible.
 
+        for al in als:
             #grab all non-proper pairs.
             if not al.is_paired and not al.is_proper_pair:
                 writeQueue.put(('write_pairs', al))
@@ -100,7 +98,7 @@ def al_scanner(readQueue, writeQueue, clip_len, max_opp_clip):
             #this case: proper pair, unique mapping. check for clips, if so, flag the read
             elif al.mapq > 0:
                 cigar = al.cigar
-                #NOTE cigar = tuple list format [(0,14),(4,20)], cigarstr = string format
+                #NOTE: cigar is tuple list format [(0,14),(4,20)]
                 #cigar_dict = {0:'M',1:'I',2:'D',3:'N',4:'S',5:'H',6:'P',7:'=',8:'X'}
                 #if clipped at least clip_len on L:
                 if cigar[0][0] == 4 and cigar[0][1] >= clip_len:
@@ -243,40 +241,40 @@ def get_args():
     # send back the user input
     return args
 
-
 # ====================
 # SAM Class
 # ====================
 class sam_al(object):
+    '''Class representing a SAM file alignment entry'''
+    
     def __init__(self, sam, in_sam=False):
-
-        #case: input is pysam al
-        if type(sam)==pysam.AlignedRead and type(in_sam)==pysam.Samfile:
-                self.read_pysam(sam, in_sam)
-        elif type(sam)==str:
-            sam = sam.strip("\n").split("\t")
-            if len(sam) < 11:
-                exit("Error, sam_al input is not complete SAM entry")
-        elif type(sam)!=list:
-            exit("Error, sam_al() requires list, str, or pysam.Samfile objects as input")
+        #manual overloading based on arg types
+        if type(sam)==pysam.AlignedRead and in_sam:
+            self.read_pysam(sam, in_sam)
+        elif type(sam)==str or type(sam)==list:
+            self.read(sam)
         else:
-            exit("Error: sam_al requires pysam.Samfile AND pysam.AlignedRead")
-        
-        # self.qname = sam[0]
-        # self.flag = int(sam[1])
-        # self.rname = sam[2]
-        # self.pos = int(sam[3])
-        # self.mapq = int(sam[4])
-        # self.cigar = sam[5]
-        # self.rnext = sam[6]
-        # self.pnext = sam[7]
-        # self.tlen = int(sam[8])
-        # self.seq = sam[9]
-        # self.qual = sam[10]
-        # self.tags = {}
-        # for i in range(10,len(sam)):
-        #     tag, ttype, val = sam[i].split(":")
-        #     tags[tag]=(ttype, val)
+            exit("Error creating sam_al.\nUsage:sam_al(samlist), \
+                sam_al(samstr), sam_al(pysam.al, pysam.infile)")
+
+    def read(self, sam):
+        if type(sam)==str:
+            sam = sam.strip("\n").split("\t")
+        self.qname = sam[0]
+        self.flag = int(sam[1])
+        self.rname = sam[2]
+        self.pos = int(sam[3])
+        self.mapq = int(sam[4])
+        self.cigar = sam[5]
+        self.rnext = sam[6]
+        self.pnext = sam[7]
+        self.tlen = int(sam[8])
+        self.seq = sam[9]
+        self.qual = sam[10]
+        self.tags = {}
+        for i in range(10,len(sam)):
+            tag, ttype, val = sam[i].split(":")
+            tags[tag]=(val)
         return
 
     def read_pysam(self, al, in_sam):
@@ -302,8 +300,9 @@ class sam_al(object):
         self.qend = al.qend
         self.is_reverse = al.is_reverse
         self.is_paired = al.is_paired
+        return
 
-    def write(self, output):
+    def sam_str(self):
         outlist = [self.qname, str(self.flag), self.rname, 
                     str(self.pos), str(self.mapq), self.cigarstring, 
                     self.rnext, str(self.pnext), str(self.tlen), self.seq, self.qual]
@@ -314,7 +313,12 @@ class sam_al(object):
             else:
                 ttype = 'Z'
             outlist.append("{0}:{1}:{2}".format(tag, ttype, val))
-        output.write("\t".join(outlist)+"\n")
+        return "\t".join(outlist)+"\n"
+
+    def write(self, output):
+        line = self.sam_str()
+        output.write(line)
+        return
 
 # ============================================
 # driver
@@ -330,4 +334,3 @@ if __name__ == "__main__":
     except IOError, e:
         if e.errno != 32:  # ignore SIGPIPE
             raise
-
