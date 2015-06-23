@@ -18,14 +18,16 @@ def main():
 
     #get IO streams
     in_bam = get_sam_IO(args.input, args.S)
-
+    header = "@HD\tVN:1.3\tSO:unsorted\n"
+    header+="\n".join(in_bam.text.split("\n")[1:])
+    
     #Open read and write queues
     readQueue = Queue()
     writeQueue = Queue()
 
     #Create reader and writer processes
     reader = Process(target=bam_reader, args=((in_bam, 10000, readQueue, args.t)))
-    writer = Process(target=bam_writer, args=((writeQueue, args.t, args.anchors, args.single, args.pair)))
+    writer = Process(target=bam_writer, args=((writeQueue, header, args.t, args.anchors, args.single, args.pair)))
 
     #Start them first
     reader.start()
@@ -80,8 +82,8 @@ def al_scanner(readQueue, writeQueue, clip_len, max_opp_clip):
         if als == 'DONE':
             writeQueue.put('DONE')
             return
-        while int(writeQueue.qsize()) > 10:
-            sys.stderr.write("writeQueue Waiting...\n")
+        while int(writeQueue.qsize()) > 2000:
+            #sys.stderr.write("writeQueue Waiting...\n")
             time.sleep(0.1)
             #currently my writer process is very slow. this prevents massive memory usage.
             #can specify max queue size with Queue(size) but this way is more flexible.
@@ -121,13 +123,13 @@ def bam_reader(in_bam, chunk, readQueue, workers):
         al = sam_al(al, in_bam)
         als.append(al)
         i+=1
-        if i==chunk:
+        if i == chunk:
             readQueue.put(als)
             als = []
             i = 0
             #don't let queue get too big
             while int(readQueue.qsize()) > 10:
-                sys.stderr.write("readQueue Waiting...\n")
+                #sys.stderr.write("readQueue Waiting...\n")
                 time.sleep(0.01)
     readQueue.put(als)
     #each worker must recieve a 'DONE' token in order to exit
@@ -136,12 +138,14 @@ def bam_reader(in_bam, chunk, readQueue, workers):
     return
     
 #file output worker
-def bam_writer(writeQueue, workers, anchors_out, single_fq, pair_fq):
+def bam_writer(writeQueue, header, workers, anchors_out, single_fq, pair_fq):
     anchors = open(anchors_out, 'w+')
     single_fq = open(single_fq, 'w+')
     pair_fq = open(pair_fq, 'w+')
+
     finished = 0
     mates = {}
+    anchors.write(header)
     while finished < workers:
         writelist = writeQueue.get()
         if writelist == 'DONE':
@@ -177,6 +181,7 @@ def write_fastq(al, fq) :
         seq = reverse_complement(seq)
         quals = quals[::-1]
     fq.write("@"+al.qname+" OC:Z:"+al.cigarstring+"\n"+seq+"\n+\n"+quals+"\n")
+    return
     
 def write_pairs(al1, al2, anchors, single_fq, pair_fq):
     #both reads uniquely mapped
@@ -196,10 +201,10 @@ def write_pairs(al1, al2, anchors, single_fq, pair_fq):
     
 def write_clip(writelist, anchors, single_fq):
     al, side = writelist
-    if side=="L":
+    if side == "L":
         seq = al.seq[:al.qstart]
         quals = al.qual[:al.qstart]
-    elif side=="R":
+    elif side == "R":
         seq = al.seq[al.qend:]
         quals = al.qual[al.qend:]
     if al.is_reverse:
@@ -246,12 +251,12 @@ def get_args():
 # ====================
 class sam_al(object):
     '''Class representing a SAM file alignment entry'''
-    
+
     def __init__(self, sam, in_sam=False):
         #manual overloading based on arg types
-        if type(sam)==pysam.AlignedRead and in_sam:
+        if type(sam) == pysam.AlignedRead and in_sam:
             self.read_pysam(sam, in_sam)
-        elif type(sam)==str or type(sam)==list:
+        elif type(sam) == str or type(sam) == list:
             self.read(sam)
         else:
             exit("Error creating sam_al.\nUsage:sam_al(samlist), \
