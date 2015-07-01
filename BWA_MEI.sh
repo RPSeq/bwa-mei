@@ -1,9 +1,8 @@
 #!/bin/sh
 
 #Check if correct command line input
-
 if [ $# -ne 6 ]; then
-    echo "Usage: bash pipeline.sh <results prefix> <BAM file path> <MEI reference path> <output directory name> <ref_mapq_cutoff> <mei_mapq_cutoff>"
+    echo "Usage: bash pipeline.sh <results prefix> <BAM file path> <MEI reference path> <output directory name> <REF MAPQ cutoff> <MEI MAPQ cutoff>"
     exit 1
 fi
 
@@ -12,119 +11,87 @@ PREFIX=$1
 INPUT_BAM=$2
 MEI_REF=$3
 OUTPUT_DIR_NAME=$4
-REF_CUTOFF=$5
-MEI_CUTOFF=$6
-
+REF_MAPQ=$5
+MEI_MAPQ=$6
 
 #Set relative dirs
 WORKING_DIR=$(readlink -f $PWD)
 SCRIPTS_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 FILE_LABEL=$(basename $INPUT_BAM ".bam")
 FILE_DIR=$(dirname $INPUT_BAM)
-SPLITTERS=${FILE_DIR}/${FILE_LABEL}.splitters.bam
 
 #Set output directory
 RESULTS_DIR=${WORKING_DIR}/${OUTPUT_DIR_NAME}
+OUTPUT=$RESULTS_DIR/$PREFIX
 
 ##Check if output dir exists and ask to overwrite
-# if [ -d ${RESULTS_DIR} ]; then
+if [ -d ${RESULTS_DIR} ]; then
+    echo "Error: output directory already exists."
+    exit
+else
+    mkdir ${RESULTS_DIR}
+fi
 
-#     read -p "Output directory already exists, do you want to overwrite? (yes/no): " overwrite
+#Pipes for streaming candidate alignments
+mkfifo ${OUTPUT}.pairs_fq
+mkfifo ${OUTPUT}.clips_fq
 
-#     if [ "$overwrite" == "y" ] || [ "$overwrite" == "yes" ] || \
-#     [ "$overwrite" == "Y" ] || [ "$overwrite" == "YES" ]; then
-#         #rm -f ${RESULTS_DIR}/*
-#         echo "OVERWRITTEN"
-#     else
-#         echo "Cancelled."
-#         exit 1
-#     fi
+#	Note- These three commands run simultaneously. 
+#	1. Extract MEI realignment candidates from input bam file
+sambamba view -t 4 -f bam -l 0 $INPUT_BAM \
+	| python ${SCRIPTS_DIR}/extract_candidates.py -pa ${OUTPUT}.pair_anchors.sam -pf ${OUTPUT}.pairs_fq -ca ${OUTPUT}.clip_anchors.sam -cf ${OUTPUT}.clips_fq -c 20 &
 
-# else
-#     mkdir ${RESULTS_DIR}
-# fi
+# 		a. Realign the paired candidates
+bwa mem -t 8 -k 11 -M $MEI_REF ${OUTPUT}.pairs_fq \
+	| samtools view -F 260 -b -u - \
+	| sambamba sort -t 2 -m 2G -n -o ${OUTPUT}.pairs.bam /dev/stdin &
 
-#	b. Get insert size distribution file
+# 		b. Realign the clipped candidates
+bwa mem -t 8 -k 11 -M $MEI_REF ${OUTPUT}.clips_fq \
+	| samtools view -F 260 -b -u - \
+	| sambamba sort -t 2 -m 2G -n -o ${OUTPUT}.clips.bam /dev/stdin &
 
+#Wait for extraction and realignment to finish and delete pipes
+wait
+rm -f ${OUTPUT}.pairs_fq
+rm -f ${OUTPUT}.clips_fq
+
+#	2. Use zjoin to get clip anchors that match with clip unanchors that hit MEIs.
+#		Then, namesort and merge for repair_cigars script, followed by MAPQ filtering.
+#		Coordinate sort the resulting BAM. This is the SR file for LUMPY.
+zjoin -a ${OUTPUT}.clip_anchors.sam -b <(samtools view ${OUTPUT}.clips.bam) -wa \
+	| cat <(grep "^@" ${OUTPUT}.clip_anchors.sam) - \
+	| samtools view -b -u - \
+	| sambamba sort -t 2 -m 3G -n -o /dev/stdout /dev/stdin \
+	| sambamba merge /dev/stdout ${OUTPUT}.clips.bam /dev/stdin \
+	| python ${SCRIPTS_DIR}/repair_cigars.py -i /dev/stdin -c 20 \
+	| python ${SCRIPTS_DIR}/mapq_filter.py -S -a $REF_MAPQ -u $MEI_MAPQ \
+	| sambamba sort -m 3G -t 2 -o ${OUTPUT}.clips_merged.bam /dev/stdin
+
+#Pipes for streaming paired read hits
+mkfifo ${OUTPUT}.pair_anchor_hits
+mkfifo ${OUTPUT}.pair_mei_hits
+
+#	3. Filter the realigned pairs, namesort and merge the filtered MEI hits and anchored mates,
+#		and fix the pair flags. Then filter by MAPQ and coordinate sort.
+python ${SCRIPTS_DIR}/filter_pair_realigns.py -i ${OUTPUT}.pairs.bam -a ${OUTPUT}.pair_anchors.sam -o ${OUTPUT}.pair_mei_hits -ao ${OUTPUT}.pair_anchor_hits &
+sambamba merge /dev/stdout <(sambamba sort -m 3G -t 2 -n -o /dev/stdout ${OUTPUT}.pair_mei_hits) <(sambamba sort -m 3G -t 2 -n -o /dev/stdout ${OUTPUT}.pair_anchor_hits) \
+	| python ${SCRIPTS_DIR}/fix_pair_flags.py -i /dev/stdin \
+	| python ${SCRIPTS_DIR}/mapq_filter.py -S -a $REF_MAPQ -u $MEI_MAPQ \
+	| sambamba sort -m 3G -t 2 -o ${OUTPUT}.pairs_merged.bam /dev/stdin
+
+#Wait for filtering script to finish then delete the pipes
+wait
+rm -f ${OUTPUT}.pair_anchor_hits
+rm -f ${OUTPUT}.pair_mei_hits
+
+# 	4. Get insert size distribution file
 HIST_OUT=$(samtools view ${INPUT_BAM} | head -n 1000000 | tail -n 100000 | python $SCRIPTS_DIR/pairend_distro.py -r 101 -X 4 -N 100000 -o ${RESULTS_DIR}/${PREFIX}.histo.out)
 MEAN=$(echo $HIST_OUT | tr ' ' '\n'  | cut -f 2 -d ":" | tr '\n' '\t' | cut -f 1)
 STDEV=$(echo $HIST_OUT | tr ' ' '\n'  | cut -f 2 -d ":" | tr '\n' '\t' | cut -f 2)
 
-# 1. get MEI candidates
-sambamba view -t 2 -f bam -l 0 -F "\
-paired and [MQ] != 0 and (mapping_quality == 0 or unmapped) \
-and not (proper_pair or secondary_alignment \
-or duplicate or mate_is_unmapped)" \
-${INPUT_BAM} | bamToFastq -i /dev/stdin -fq /dev/stdout | bwa mem -t 8 -k 11 -M ${MEI_REF} - | \
-sambamba view -t 4 --sam-input -f bam -F "not (secondary_alignment or duplicate or unmapped)" /dev/stdin | \
-sambamba sort -t 4 -m 2G -n /dev/stdin -o ${RESULTS_DIR}/${PREFIX}.disc.fixed.bam;
+#	5. Call lumpy
+/gscmnt/gc2719/halllab/users/rsmith/git/lumpy-sv/bin/lumpy -mw 1 -tt 0 -pe bam_file:${OUTPUT}.pairs_merged.bam,histo_file:${OUTPUT}.histo.out,mean:${MEAN},stdev:${STDEV},read_length:101,min_non_overlap:101,discordant_z:5,back_distance:10,weight:1,id:10,min_mapping_threshold:0 -sr bam_file:${OUTPUT}.clips_merged.bam,back_distance:10,min_mapping_threshold:0,weight:1,id:10,min_clip:20 > ${OUTPUT}.vcf 2> ${OUTPUT}.lumpyerr;
 
-# 2. get anchors for MEI candidates
-sambamba view -t 4 -f bam -F "\
-paired and ([MQ] == 0 or mate_is_unmapped) and mapping_quality > 0 \
-and not (proper_pair or secondary_alignment \
-or duplicate or unmapped)" \
-${INPUT_BAM} > ${RESULTS_DIR}/${PREFIX}.disc.anchors.bam;
-
-#print read counts to log
-OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.disc.anchors.bam | wc -l)";
-echo -e "Paired-end candidates:\t${OUTPUT}" > ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.disc.fixed.bam | wc -l)";
-echo -e "Paired-end BWA MEM hits:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-#   a. Get IDS of mapped reads
-samtools view ${RESULTS_DIR}/${PREFIX}.disc.fixed.bam | awk '{print $1}' | uniq > ${RESULTS_DIR}/${PREFIX}.disc.hits.id;
-
-#   b. Pull hits from anchored bam file
-python ${SCRIPTS_DIR}/remove_nonpairs.py -a ${RESULTS_DIR}/${PREFIX}.disc.anchors.bam \
--b ${RESULTS_DIR}/${PREFIX}.disc.hits.id | sambamba sort -t 4 -m 2G -n /dev/stdin -o ${RESULTS_DIR}/${PREFIX}.disc.anchored.mates.bam;
-
-#   c. Merge bams from anchored and unanchored file.
-sambamba merge -t 4 ${RESULTS_DIR}/${PREFIX}.disc.merged.bam ${RESULTS_DIR}/${PREFIX}.disc.anchored.mates.bam ${RESULTS_DIR}/${PREFIX}.disc.fixed.bam;
-
-# 6. Fix the flags and mate coordinates for read pairs (currently excludes secondary alignments)
-python $SCRIPTS_DIR/fix_pair_flags.py -i ${RESULTS_DIR}/${PREFIX}.disc.merged.bam | \
-python ${SCRIPTS_DIR}/mapq_filter.py -S -a $REF_CUTOFF -u $MEI_CUTOFF > ${RESULTS_DIR}/${PREFIX}.disc.repaired.merged.bam;
-
-# 7. Coordinate sort before running LUMPY
-samtools sort ${RESULTS_DIR}/${PREFIX}.disc.repaired.merged.bam ${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged;
-
-OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged.bam | wc -l)";
-OUTPUT=$((OUTPUT/2));
-echo -e "Total read-pairs fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-#extract and align splitters
-python ${SCRIPTS_DIR}/extract_splitters.py -c 20 -i ${SPLITTERS} -a ${RESULTS_DIR}/${PREFIX}.split.anchors.bam -u /dev/stdout | bwa mem -t 8 -k 11 -M -C ${MEI_REF} - | \
-sambamba view --sam-input -t 4 -h -F "not (unmapped or secondary_alignment)" /dev/stdin | \
-sambamba view -t 1 --sam-input -f bam -l 0 /dev/stdin | sambamba sort -t 2 -m 2G -n /dev/stdin -o ${RESULTS_DIR}/${PREFIX}.split.hit.unanchors.bam;
-
-OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.split.anchors.bam | wc -l)";
-echo -e "Split-read candidates:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.split.hit.unanchors.bam | wc -l)";
-echo -e "Split-read BWA MEM hits:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-#make list of successfully realigned unanchors
-samtools view ${RESULTS_DIR}/${PREFIX}.split.hit.unanchors.bam | awk '{print $1}' > ${RESULTS_DIR}/${PREFIX}.split.hit.ids;
-
-#pull corresponding anchors from anchors bam file
-python ${SCRIPTS_DIR}/remove_nonpairs.py -a ${RESULTS_DIR}/${PREFIX}.split.anchors.bam -b ${RESULTS_DIR}/${PREFIX}.split.hit.ids | sambamba sort -t 4 -m 2G -n /dev/stdin -o ${RESULTS_DIR}/${PREFIX}.split.hit.anchors.bam;
-
-#merge anchors and realigned unanchors
-sambamba merge -t 4 ${RESULTS_DIR}/${PREFIX}.split.merged.bam ${RESULTS_DIR}/${PREFIX}.split.hit.anchors.bam ${RESULTS_DIR}/${PREFIX}.split.hit.unanchors.bam;
-
-#call repair script
-python ${SCRIPTS_DIR}/repair_cigars.py -c 20 -i ${RESULTS_DIR}/${PREFIX}.split.merged.bam | \
-python ${SCRIPTS_DIR}/mapq_filter.py -S -a $REF_CUTOFF -u $MEI_CUTOFF > ${RESULTS_DIR}/${PREFIX}.split.repaired.bam;
-
-OUTPUT="$(samtools view ${RESULTS_DIR}/${PREFIX}.split.repaired.bam | wc -l)";
-OUTPUT=$((OUTPUT/2));
-echo -e "Total split-read pairs fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PREFIX}_reads_flow.log;
-
-sambamba sort -t 2 ${RESULTS_DIR}/${PREFIX}.split.repaired.bam -o ${RESULTS_DIR}/${PREFIX}.split.repaired.sorted.bam
-
-#call lumpy
-/gscmnt/gc2719/halllab/users/rsmith/git/lumpy-sv/bin/lumpy -mw 1 -tt 0 -pe bam_file:${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged.bam,histo_file:${RESULTS_DIR}/${PREFIX}.histo.out,mean:${MEAN},stdev:${STDEV},read_length:101,min_non_overlap:101,discordant_z:5,back_distance:10,weight:1,id:10,min_mapping_threshold:0 -sr bam_file:${RESULTS_DIR}/${PREFIX}.split.repaired.sorted.bam,back_distance:10,min_mapping_threshold:0,weight:1,id:10,min_clip:20 > ${RESULTS_DIR}/${PREFIX}.vcf 2> ${RESULTS_DIR}/${PREFIX}.lumpyerr;
-
-awk '{OFS="\t"; FS="\t"} {if($0 ~ /^E/ || $0 ~ /^A/ || $0 ~ /^C/) print $0}' ${RESULTS_DIR}/${PREFIX}.lumpyerr > ${RESULTS_DIR}/${PREFIX}.errsplits;
+#	6. Cluster LUMPY breakpoint calls and collapse into indivual MEI events.
+python ${SCRIPTS_DIR}/cluster.py -i <(vcf-sort ${OUTPUT}.vcf) > ${OUTPUT}.clusters.bed
