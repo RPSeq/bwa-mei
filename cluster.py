@@ -346,9 +346,8 @@ def merge_meis(var_cluster):
         SR = SR5+SR3    
         PE = PE5+PE3
         passed = False
-        if SR > 0:
-            passed = True
-        if SR < 1 and (PE > 2):
+        #no filtering for now.
+        if SR > 0 or (PE5 > 0 and PE3 > 0):
             passed = True
         
             

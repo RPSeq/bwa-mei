@@ -15,7 +15,7 @@ __author__ = "Ryan Smith (ryanpsmith@wustl.edu) with code by Colby Chiang (cc2qe
 __version__ = "$Revision: 0.0.1 $"
 __date__ = "$Date: 2015-01-27 15:52 $"
 
-def fixpairflags(bamfile, outfile):
+def fixpairflags(bamfile):
     # set input file
     in_bam = pysam.Samfile(bamfile, "rb")
 
@@ -136,7 +136,6 @@ author: " + __author__ + "\n\
 version: " + __version__ + "\n\
 description: Group BAM file by read IDs without sorting")
     parser.add_argument('-i', '--input', metavar='BAM', required=False, help='Input BAM file')
-    parser.add_argument('-o', '--output', metavar='OUT', required=False, help='Output BAM file')
     # parse the arguments
     args = parser.parse_args()
 
@@ -153,7 +152,7 @@ class Usage(Exception):
 
 def main():
     args = get_args()
-    fixpairflags(args.input, args.output)
+    fixpairflags(args.input)
 
 if __name__ == "__main__":
     try:

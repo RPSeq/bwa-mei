@@ -95,10 +95,10 @@ def groupsplitters(bamfile, clips):
         al_2 = in_bam.next()
 
         #MEI anchor has OC tag
-        if 'OC' in dict(al_1.tags):
+        if 'moblist' in in_bam.getrname(al_1.rname):
             al_1 = repair_cigars(al_1, al_2, clips)
 
-        elif 'OC' in dict(al_2.tags):
+        elif 'moblist' in in_bam.getrname(al_2.rname):
             al_2 = repair_cigars(al_2, al_1, clips)
 
         out_bam.write(al_1)

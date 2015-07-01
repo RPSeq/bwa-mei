@@ -27,24 +27,25 @@ SPLITTERS=${FILE_DIR}/${FILE_LABEL}.splitters.bam
 RESULTS_DIR=${WORKING_DIR}/${OUTPUT_DIR_NAME}
 
 ##Check if output dir exists and ask to overwrite
-if [ -d ${RESULTS_DIR} ]; then
+# if [ -d ${RESULTS_DIR} ]; then
 
-    read -p "Output directory already exists, do you want to overwrite? (yes/no): " overwrite
+#     read -p "Output directory already exists, do you want to overwrite? (yes/no): " overwrite
 
-    if [ "$overwrite" == "y" ] || [ "$overwrite" == "yes" ] || \
-    [ "$overwrite" == "Y" ] || [ "$overwrite" == "YES" ]; then
-        #rm -f ${RESULTS_DIR}/*
-        echo "OVERWRITTEN"
-    else
-        echo "Cancelled."
-        exit 1
-    fi
+#     if [ "$overwrite" == "y" ] || [ "$overwrite" == "yes" ] || \
+#     [ "$overwrite" == "Y" ] || [ "$overwrite" == "YES" ]; then
+#         #rm -f ${RESULTS_DIR}/*
+#         echo "OVERWRITTEN"
+#     else
+#         echo "Cancelled."
+#         exit 1
+#     fi
 
-else
-    mkdir ${RESULTS_DIR}
-fi
+# else
+#     mkdir ${RESULTS_DIR}
+# fi
 
 #	b. Get insert size distribution file
+
 HIST_OUT=$(samtools view ${INPUT_BAM} | head -n 1000000 | tail -n 100000 | python $SCRIPTS_DIR/pairend_distro.py -r 101 -X 4 -N 100000 -o ${RESULTS_DIR}/${PREFIX}.histo.out)
 MEAN=$(echo $HIST_OUT | tr ' ' '\n'  | cut -f 2 -d ":" | tr '\n' '\t' | cut -f 1)
 STDEV=$(echo $HIST_OUT | tr ' ' '\n'  | cut -f 2 -d ":" | tr '\n' '\t' | cut -f 2)
@@ -124,6 +125,6 @@ echo -e "Total split-read pairs fed to LUMPY:\t${OUTPUT}" >> ${RESULTS_DIR}/${PR
 sambamba sort -t 2 ${RESULTS_DIR}/${PREFIX}.split.repaired.bam -o ${RESULTS_DIR}/${PREFIX}.split.repaired.sorted.bam
 
 #call lumpy
-/gscmnt/gc2719/halllab/users/rsmith/git/lumpy-sv/bin/lumpy -mw 1 -tt 0 -pe bam_file:${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged.bam,histo_file:${RESULTS_DIR}/${PREFIX}.histo.out,mean:319.551326228,stdev:74.2952533362,read_length:101,min_non_overlap:101,discordant_z:5,back_distance:10,weight:1,id:10,min_mapping_threshold:0 -sr bam_file:${RESULTS_DIR}/${PREFIX}.split.repaired.sorted.bam,back_distance:10,min_mapping_threshold:0,weight:1,id:10,min_clip:20 > ${RESULTS_DIR}/${PREFIX}.vcf 2> ${RESULTS_DIR}/${PREFIX}.lumpyerr;
+/gscmnt/gc2719/halllab/users/rsmith/git/lumpy-sv/bin/lumpy -mw 1 -tt 0 -pe bam_file:${RESULTS_DIR}/${PREFIX}.disc.sorted.repaired.merged.bam,histo_file:${RESULTS_DIR}/${PREFIX}.histo.out,mean:${MEAN},stdev:${STDEV},read_length:101,min_non_overlap:101,discordant_z:5,back_distance:10,weight:1,id:10,min_mapping_threshold:0 -sr bam_file:${RESULTS_DIR}/${PREFIX}.split.repaired.sorted.bam,back_distance:10,min_mapping_threshold:0,weight:1,id:10,min_clip:20 > ${RESULTS_DIR}/${PREFIX}.vcf 2> ${RESULTS_DIR}/${PREFIX}.lumpyerr;
 
 awk '{OFS="\t"; FS="\t"} {if($0 ~ /^E/ || $0 ~ /^A/ || $0 ~ /^C/) print $0}' ${RESULTS_DIR}/${PREFIX}.lumpyerr > ${RESULTS_DIR}/${PREFIX}.errsplits;

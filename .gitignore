@@ -4,6 +4,7 @@
 *.vcf
 *.txt
 *.bam
+*.sam
 *.bam.bai
 *.fq
 *.fastq
@@ -11,3 +12,4 @@
 *.histo.out
 *.err
 *.stdout
+*.notes

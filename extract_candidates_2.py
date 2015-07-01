@@ -24,7 +24,6 @@ def main():
     header+="\n".join(in_bam.text.split("\n")[1:])
     
     #Open read and write queues
-    #size = 4000*(1024*1024)
     readQueue = Queue()
     writeQueue = Queue()
 
