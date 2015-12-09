@@ -61,8 +61,8 @@ def filter_realigned_pairs(bamfile, anchorfile, is_sam, out_bam, out_anchors, cl
                 mei_name = namelist[0]
                 mei_num = namelist[1]
             if num != mei_num and mismatch(mei_al) <= 0.1:
-                al.qname = name
-                mei_al.qname = name
+                # al.qname = name
+                # mei_al.qname = name
                 out_anchors.write(al)
                 out_bam.write(mei_al)
                 del d[name]
