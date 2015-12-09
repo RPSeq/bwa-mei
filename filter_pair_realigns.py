@@ -16,7 +16,7 @@ __author__ = "Ryan Smith (ryanpsmith@wustl.edu) with code by Colby Chiang (cc2qe
 __version__ = "$Revision: 0.0.1 $"
 __date__ = "$Date: 2014-12-15 11:43 $"
 
-def filter_realigned_pairs(bamfile, anchorfile, is_sam, out_bam, out_anchors):
+def filter_realigned_pairs(bamfile, anchorfile, is_sam, out_bam, out_anchors, clips_merged):
     # set input file
     if bamfile == None:
         if is_sam:
@@ -30,8 +30,13 @@ def filter_realigned_pairs(bamfile, anchorfile, is_sam, out_bam, out_anchors):
             in_bam = pysam.Samfile(bamfile, "rb")
         
     anchors_in = pysam.Samfile(anchorfile, 'r')
+    clips_merged = pysam.Samfile(clips_merged, 'rb')
     out_bam = pysam.Samfile(out_bam, 'wb', template=in_bam)
     out_anchors = pysam.Samfile(out_anchors, 'wb', template=anchors_in)
+
+    # clips = set()
+    # for al in clips_merged:
+    #     clips.add(al.qname)
 
     prev_al = False
     d = defaultdict(list)
@@ -44,6 +49,8 @@ def filter_realigned_pairs(bamfile, anchorfile, is_sam, out_bam, out_anchors):
 
     for al in anchors_in:
         name, num = al.qname.split("_")
+        # if name in clips:
+        #     continue
         if name in d:
             if len(d[name]) > 1:
                 del d[name]
@@ -85,6 +92,7 @@ description: Group BAM file by read IDs without sorting")
     parser.add_argument('-a', required=True, help='Input pairs anchor file')
     parser.add_argument('-o', required=True, help='Output MEI BAM')
     parser.add_argument('-ao', required=True, help='Output anchors BAM file')
+    parser.add_argument('-c', required=True, help='Merged clips BAM to exclude from pairs.')
     # parse the arguments
     args = parser.parse_args()
     
@@ -107,7 +115,7 @@ class Usage(Exception):
 
 def main():
     args = get_args()
-    filter_realigned_pairs(args.input, args.a, args.S, args.o, args.ao)
+    filter_realigned_pairs(args.input, args.a, args.S, args.o, args.ao, args.c)
 
 if __name__ == "__main__":
     try:

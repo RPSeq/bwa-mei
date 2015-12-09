@@ -188,17 +188,18 @@ def extract_clippers(bamfile, is_sam, pair_anchors, pair_fastq, clip_anchors, cl
                     clip_fq_batch.append(fq)
                     clip_anchor_batch.append(anc)
 
-
-        if not al.is_proper_pair:
-            fq, anc = write_pairs(al, in_bam)
-            if fq and anc:
-                pair_fq_batch.append(fq)
-                pair_anchor_batch.append(anc)
-            elif anc:
-                pair_anchor_batch.append(anc)
+#THIS SHOULD BE CHANGED SO USES ZSCORE 3 DIFFERENCE FROM EXPECTED TEMPLATE LENGTH FOR EACH READ GROUP
+#SHOULD ALSO JUST USE ONE IF (cond1 | cond2 | cond3):
+        # if not al.is_proper_pair:
+        #     fq, anc = write_pairs(al, in_bam)
+        #     if fq and anc:
+        #         pair_fq_batch.append(fq)
+        #         pair_anchor_batch.append(anc)
+        #     elif anc:
+        #         pair_anchor_batch.append(anc)
 
         #mate mapped to diff chrom 
-        elif al.rname != al.mrnm:
+        if al.rname != al.mrnm:
             #print("rname")
             fq, anc = write_pairs(al, in_bam)
             if fq and anc:

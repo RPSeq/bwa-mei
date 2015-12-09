@@ -347,7 +347,7 @@ def merge_meis(var_cluster):
         PE = PE5+PE3
         passed = False
         #no filtering for now.
-        if SR > 0 or (PE5 > 0 and PE3 > 0):
+        if SR + PE >= 2:
             passed = True
         
             
@@ -363,7 +363,7 @@ def merge_meis(var_cluster):
         
 
 # primary function
-def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=200):
+def vcfToBedpe(vcf_file, bedpe_out, mei_prefix="moblist", window=1):
     vcf = Vcf()
     in_header = True
     header = []
